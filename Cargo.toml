@@ -1,0 +1,13 @@
+[package]
+name = "gitops"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "4.1.4", features = ["derive"] }
+git-repository = { version = "0.33.0", features = ["default", "blocking-network-client", "blocking-http-transport-reqwest-native-tls"] }
+tempfile = "3.3.0"
+thiserror = "1.0.38"
+url = { version = "2.3.1", features = ["serde"] }
