@@ -28,6 +28,12 @@ enum GitOpsError {
     ActionError(std::io::Error),
 }
 
+impl GitOpsError {
+    fn is_fatal(&self) -> bool {
+        // TODO Some errors should be recovered
+        true
+    }
+}
 struct Task {
     config: GitOpsConfig,
     next_run: Instant,
@@ -111,6 +117,7 @@ fn run_action(name: &str, action: &Action, cwd: &Path, tx: &Sender<ActionOutput>
     Ok(())
 }
 
+// TODO SSH support
 fn fetch_repo(config: GitConfig, target: &Path) -> Result<ObjectId, GitOpsError> {
     let should_interrupt = AtomicBool::new(false);
     let progress = git_repository::progress::Discard;
@@ -136,7 +143,6 @@ fn finished_task(task: &Task) -> bool {
 }
 
 fn run(tasks: &mut [Task], tx: &Sender<ActionOutput>) -> Result<Infallible, GitOpsError> {
-    // TODO Some errors should be recovered
     loop {
         if let Some(mut task) = tasks.iter_mut().find(|t| eligible_task(t)) {
             let config = task.config.clone();
@@ -160,7 +166,11 @@ fn run(tasks: &mut [Task], tx: &Sender<ActionOutput>) -> Result<Infallible, GitO
         }
         if let Some(mut task) = tasks.iter_mut().find(|t| finished_task(t)) {
             let worker = task.worker.take().unwrap();
-            task.current_sha = worker.join().unwrap()?;
+            match worker.join().unwrap() {
+                Ok(new_sha) => task.current_sha = new_sha,
+                Err(err) if err.is_fatal() => return Err(err),
+                Err(_) => (),
+            }
             continue;
         }
         sleep(Duration::from_secs(1));
