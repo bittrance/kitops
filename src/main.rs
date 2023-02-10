@@ -1,17 +1,17 @@
 use clap::Parser;
-use git_repository::{hash::Kind, prepare_clone, ObjectId, Url};
+use git_repository::{hash::Kind, progress::Discard, ObjectId, Url};
 use std::{
     collections::HashMap,
     convert::Infallible,
     io::Read,
     ops::Add,
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, ExitStatus, Stdio},
     sync::{
         atomic::AtomicBool,
         mpsc::{channel, Receiver, Sender},
     },
-    thread::{JoinHandle, sleep, spawn},
+    thread::{sleep, spawn, JoinHandle},
     time::{Duration, Instant},
 };
 use thiserror::Error;
@@ -24,6 +24,10 @@ enum GitOpsError {
     InvalidEnvVar(String),
     #[error("Failed to create or locate workdir: {0}")]
     WorkDir(std::io::Error),
+    #[error("Failed to create new repository: {0}")]
+    InitRepo(git_repository::clone::fetch::Error),
+    #[error("Failed to fetch from remote: {0}")]
+    CheckoutRepo(git_repository::clone::checkout::main_worktree::Error),
     #[error("Failed to launch action: {0}")]
     ActionError(std::io::Error),
 }
@@ -38,7 +42,6 @@ struct Task {
     config: GitOpsConfig,
     next_run: Instant,
     current_sha: ObjectId,
-    workdir: PathBuf,
     worker: Option<JoinHandle<Result<ObjectId, GitOpsError>>>,
 }
 
@@ -80,7 +83,12 @@ fn build_command(action: &Action, cwd: &Path) -> Command {
     command
 }
 
-fn run_action(name: &str, action: &Action, cwd: &Path, tx: &Sender<ActionOutput>) -> Result<(), GitOpsError> {
+fn run_action(
+    name: &str,
+    action: &Action,
+    cwd: &Path,
+    tx: &Sender<ActionOutput>,
+) -> Result<(), GitOpsError> {
     let mut command = build_command(action, cwd);
     let mut child = command.spawn().map_err(GitOpsError::ActionError)?;
     // TODO Coordinate deadline with fetch
@@ -118,20 +126,18 @@ fn run_action(name: &str, action: &Action, cwd: &Path, tx: &Sender<ActionOutput>
 }
 
 // TODO SSH support
+// TODO branch support
 fn fetch_repo(config: GitConfig, target: &Path) -> Result<ObjectId, GitOpsError> {
     let should_interrupt = AtomicBool::new(false);
     let progress = git_repository::progress::Discard;
-    // TODO Error handling
-    let repository = prepare_clone(config.url, target)
+    let (mut checkout, _) = git_repository::prepare_clone(config.url, target)
         .unwrap()
         .fetch_then_checkout(progress, &should_interrupt)
-        .unwrap()
-        .0
-        .persist();
-    repository
-        .head_commit()
-        .map(|c| c.id)
-        .or_else(|_| Ok(ObjectId::null(Kind::Sha1)))
+        .map_err(GitOpsError::InitRepo)?;
+    let (repository, _) = checkout
+        .main_worktree(Discard, &should_interrupt)
+        .map_err(GitOpsError::CheckoutRepo)?;
+    Ok(repository.head_commit().map(|c| c.id).unwrap())
 }
 
 fn eligible_task(task: &Task) -> bool {
@@ -148,7 +154,9 @@ fn run(tasks: &mut [Task], tx: &Sender<ActionOutput>) -> Result<Infallible, GitO
             let config = task.config.clone();
             let reponame = config.git.url.path.to_string();
             let current_sha = task.current_sha;
-            let workdir = task.workdir.clone();
+            let workdir = tempfile::tempdir()
+                .map_err(GitOpsError::WorkDir)?
+                .into_path();
             let task_tx = tx.clone();
             let worker = spawn(move || {
                 let new_sha = fetch_repo(config.git, &workdir)?;
@@ -158,6 +166,7 @@ fn run(tasks: &mut [Task], tx: &Sender<ActionOutput>) -> Result<Infallible, GitO
                         run_action(&name, &action, &workdir, &task_tx)?;
                     }
                 }
+                std::fs::remove_dir_all(workdir).map_err(GitOpsError::WorkDir)?;
                 Ok(new_sha)
             });
             task.worker = Some(worker);
@@ -228,15 +237,15 @@ fn task_from_opts(opts: &CliOptions) -> Result<Task, GitOpsError> {
         timeout: Duration::from_secs_f32(opts.timeout),
     };
     let actions = vec![action];
-    let workdir = tempfile::tempdir().map_err(GitOpsError::WorkDir)?;
     Ok(Task {
         config: GitOpsConfig {
-            git: GitConfig { url, /* branch: opts.branch.clone() */ },
+            git: GitConfig {
+                url, /* branch: opts.branch.clone() */
+            },
             actions,
         },
         current_sha: ObjectId::null(Kind::Sha1),
         next_run: Instant::now(),
-        workdir: workdir.into_path(),
         worker: None,
     })
 }
@@ -250,5 +259,5 @@ fn main() -> Result<Infallible, GitOpsError> {
     spawn(move || {
         logging_receiver(&rx);
     });
-    run(&mut vec![task], &tx)
+    run(&mut [task], &tx)
 }
