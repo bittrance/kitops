@@ -9,7 +9,7 @@ use std::{
     process::{Command, ExitStatus, Stdio},
     sync::{
         atomic::AtomicBool,
-        mpsc::{channel, Receiver, Sender},
+        mpsc::{channel, Receiver, SendError, Sender},
     },
     thread::{sleep, spawn, JoinHandle},
     time::{Duration, Instant},
@@ -28,6 +28,8 @@ enum GitOpsError {
     InitRepo(git_repository::clone::fetch::Error),
     #[error("Failed to fetch from remote: {0}")]
     CheckoutRepo(git_repository::clone::checkout::main_worktree::Error),
+    #[error("Failed to send event: {0}")]
+    SendError(SendError<ActionOutput>),
     #[error("Failed to launch action: {0}")]
     ActionError(std::io::Error),
 }
@@ -67,6 +69,7 @@ struct Action {
 }
 
 enum ActionOutput {
+    Changes(String, ObjectId, ObjectId),
     Stdout(String, Vec<u8>),
     Stderr(String, Vec<u8>),
     Exit(String, ExitStatus),
@@ -96,28 +99,26 @@ fn run_action(
     let mut stdout = child.stdout.take().unwrap();
     let mut stderr = child.stderr.take().unwrap();
     let mut buf: [u8; 4096] = [0; 4096];
-    let as_action_error =
-        |err| GitOpsError::ActionError(std::io::Error::new(std::io::ErrorKind::Other, err));
     loop {
         if stderr.read(&mut buf).map_err(GitOpsError::ActionError)? > 0 {
             tx.send(ActionOutput::Stderr(name.to_string(), buf.into()))
-                .map_err(as_action_error)?;
+                .map_err(GitOpsError::SendError)?;
             continue;
         }
         if stdout.read(&mut buf).map_err(GitOpsError::ActionError)? > 0 {
             tx.send(ActionOutput::Stdout(name.to_string(), buf.into()))
-                .map_err(as_action_error)?;
+                .map_err(GitOpsError::SendError)?;
             continue;
         }
         if let Some(exit) = child.try_wait().map_err(GitOpsError::ActionError)? {
             tx.send(ActionOutput::Exit(name.to_string(), exit))
-                .map_err(as_action_error)?;
+                .map_err(GitOpsError::SendError)?;
             break;
         }
         if Instant::now() > deadline {
             child.kill().map_err(GitOpsError::ActionError)?;
             tx.send(ActionOutput::Timeout(name.to_string()))
-                .map_err(as_action_error)?;
+                .map_err(GitOpsError::SendError)?;
             break;
         }
         sleep(Duration::from_secs(1));
@@ -161,6 +162,13 @@ fn run(tasks: &mut [Task], tx: &Sender<ActionOutput>) -> Result<Infallible, GitO
             let worker = spawn(move || {
                 let new_sha = fetch_repo(config.git, &workdir)?;
                 if current_sha != new_sha {
+                    task_tx
+                        .send(ActionOutput::Changes(
+                            reponame.clone(),
+                            current_sha,
+                            new_sha,
+                        ))
+                        .map_err(GitOpsError::SendError)?;
                     for action in config.actions {
                         let name = format!("{}|{}", reponame, action.name);
                         run_action(&name, &action, &workdir, &task_tx)?;
@@ -189,6 +197,13 @@ fn run(tasks: &mut [Task], tx: &Sender<ActionOutput>) -> Result<Infallible, GitO
 fn logging_receiver(events: &Receiver<ActionOutput>) {
     while let Ok(event) = events.recv() {
         match event {
+            ActionOutput::Changes(name, prev_sha, new_sha) => {
+                if prev_sha == ObjectId::null(Kind::Sha1) {
+                    println!("{}: New repo @ {}", name, new_sha);
+                } else {
+                    println!("{}: Updated repo {} -> {}", name, prev_sha, new_sha);
+                }
+            }
             ActionOutput::Stdout(name, data) => {
                 print!("{}: {}", name, String::from_utf8_lossy(&data));
             }
