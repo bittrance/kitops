@@ -68,10 +68,15 @@ struct Action {
     timeout: Duration,
 }
 
+#[derive(Clone, Copy)]
+enum SourceType {
+    StdOut,
+    StdErr,
+}
+
 enum ActionOutput {
     Changes(String, ObjectId, ObjectId),
-    Stdout(String, Vec<u8>),
-    Stderr(String, Vec<u8>),
+    Output(String, SourceType, Vec<u8>),
     Exit(String, ExitStatus),
     Timeout(String),
 }
@@ -79,11 +84,31 @@ enum ActionOutput {
 fn build_command(action: &Action, cwd: &Path) -> Command {
     let mut command = Command::new(action.entrypoint.clone());
     command.args(action.args.clone());
+    // TODO command.env_clear() ?
     command.envs(action.environment.iter());
     command.current_dir(cwd);
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
     command
+}
+
+fn emit_data<R>(
+    name: String,
+    mut source: R,
+    source_type: SourceType,
+    tx: Sender<ActionOutput>,
+) -> JoinHandle<Result<(), GitOpsError>>
+where
+    R: Read + Send + 'static,
+{
+    spawn(move || {
+        let mut buf: [u8; 4096] = [0; 4096];
+        while source.read(&mut buf).map_err(GitOpsError::ActionError)? > 0 {
+            tx.send(ActionOutput::Output(name.clone(), source_type, buf.into()))
+                .map_err(GitOpsError::SendError)?;
+        }
+        Ok::<(), GitOpsError>(())
+    })
 }
 
 fn run_action(
@@ -96,20 +121,12 @@ fn run_action(
     let mut child = command.spawn().map_err(GitOpsError::ActionError)?;
     // TODO Coordinate deadline with fetch
     let deadline = Instant::now() + action.timeout;
-    let mut stdout = child.stdout.take().unwrap();
-    let mut stderr = child.stderr.take().unwrap();
-    let mut buf: [u8; 4096] = [0; 4096];
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    // TODO Proper cleanup; break read threads, et c
+    emit_data(name.to_string(), stdout, SourceType::StdOut, tx.clone());
+    emit_data(name.to_string(), stderr, SourceType::StdErr, tx.clone());
     loop {
-        if stderr.read(&mut buf).map_err(GitOpsError::ActionError)? > 0 {
-            tx.send(ActionOutput::Stderr(name.to_string(), buf.into()))
-                .map_err(GitOpsError::SendError)?;
-            continue;
-        }
-        if stdout.read(&mut buf).map_err(GitOpsError::ActionError)? > 0 {
-            tx.send(ActionOutput::Stdout(name.to_string(), buf.into()))
-                .map_err(GitOpsError::SendError)?;
-            continue;
-        }
         if let Some(exit) = child.try_wait().map_err(GitOpsError::ActionError)? {
             tx.send(ActionOutput::Exit(name.to_string(), exit))
                 .map_err(GitOpsError::SendError)?;
@@ -204,12 +221,10 @@ fn logging_receiver(events: &Receiver<ActionOutput>) {
                     println!("{}: Updated repo {} -> {}", name, prev_sha, new_sha);
                 }
             }
-            ActionOutput::Stdout(name, data) => {
-                print!("{}: {}", name, String::from_utf8_lossy(&data));
-            }
-            ActionOutput::Stderr(name, data) => {
-                eprint!("{}: {}", name, String::from_utf8_lossy(&data));
-            }
+            ActionOutput::Output(name, source_type, data) => match source_type {
+                SourceType::StdOut => println!("{}: {}", name, String::from_utf8_lossy(&data)),
+                SourceType::StdErr => eprintln!("{}: {}", name, String::from_utf8_lossy(&data)),
+            },
             ActionOutput::Exit(name, exit) => println!("{}: exited with code {}", name, exit),
             ActionOutput::Timeout(name) => println!("{}: took too long", name),
         }
@@ -246,8 +261,8 @@ fn task_from_opts(opts: &CliOptions) -> Result<Task, GitOpsError> {
     }
     let action = Action {
         name: opts.action.clone(),
-        entrypoint: opts.action.clone(),
-        args: vec![],
+        entrypoint: "/bin/sh".to_string(),
+        args: vec!["-c".to_string(), opts.action.clone()],
         environment,
         timeout: Duration::from_secs_f32(opts.timeout),
     };
