@@ -1,8 +1,10 @@
 use clap::Parser;
 use git_repository::{hash::Kind, progress::Discard, ObjectId, Url};
+use serde::{Deserialize, Deserializer};
 use std::{
     collections::HashMap,
     convert::Infallible,
+    fs::File,
     io::Read,
     ops::Add,
     path::Path,
@@ -22,6 +24,12 @@ enum GitOpsError {
     InvalidUrl(git_repository::url::parse::Error),
     #[error("Failed to parse environment variable: {0}")]
     InvalidEnvVar(String),
+    #[error("Config file not found: {0}")]
+    MissingConfig(std::io::Error),
+    #[error("Malformed configuration: {0}")]
+    MalformedConfig(serde_yaml::Error),
+    #[error("Provide --url and --action or --config-file")]
+    ConfigConflict,
     #[error("Failed to create or locate workdir: {0}")]
     WorkDir(std::io::Error),
     #[error("Failed to create new repository: {0}")]
@@ -47,24 +55,45 @@ struct Task {
     worker: Option<JoinHandle<Result<ObjectId, GitOpsError>>>,
 }
 
-#[derive(Clone)]
+#[derive(Deserialize)]
+struct ConfigFile {
+    tasks: Vec<GitOpsConfig>,
+}
+
+#[derive(Clone, Deserialize)]
 struct GitOpsConfig {
     git: GitConfig,
     actions: Vec<Action>,
 }
 
-#[derive(Clone)]
+fn url_from_string<'de, D>(deserializer: D) -> Result<Url, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    Url::try_from(s).map_err(serde::de::Error::custom)
+}
+
+fn default_timeout() -> Duration {
+    Duration::from_secs(3600)
+}
+
+#[derive(Clone, Deserialize)]
 struct GitConfig {
+    #[serde(deserialize_with = "url_from_string")]
     url: Url,
     // branch: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
 struct Action {
     name: String,
     entrypoint: String,
+    #[serde(default)]
     args: Vec<String>,
+    #[serde(default)]
     environment: HashMap<String, String>,
+    #[serde(default = "default_timeout")]
     timeout: Duration,
 }
 
@@ -233,25 +262,45 @@ fn logging_receiver(events: &Receiver<ActionOutput>) {
 
 #[derive(Parser)]
 struct CliOptions {
+    /// YAML format task descriptions
+    #[clap(long)]
+    config_file: Option<String>,
     /// Git repository URL (http(s) for now)
     #[clap(long)]
-    url: String,
+    url: Option<String>,
     // /// Branch to check out
     // #[clap(long)]
     // branch: String,
     /// Command to execute on change (passed to /bin/sh)
     #[clap(long)]
-    action: String,
+    action: Option<String>,
     /// Environment variable for action
     #[clap(long)]
     environment: Vec<String>,
     /// Max run time for repo fetch plus action in seconds
     #[clap(long)]
-    timeout: f32,
+    timeout: Option<f32>,
 }
 
-fn task_from_opts(opts: &CliOptions) -> Result<Task, GitOpsError> {
-    let url = Url::try_from(opts.url.clone()).map_err(GitOpsError::InvalidUrl)?;
+fn tasks_from_file(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
+    let config =
+        File::open(opts.config_file.clone().unwrap()).map_err(GitOpsError::MissingConfig)?;
+    let config_file: ConfigFile =
+        serde_yaml::from_reader(config).map_err(GitOpsError::MalformedConfig)?;
+    Ok(config_file
+        .tasks
+        .into_iter()
+        .map(|c| Task {
+            config: c,
+            current_sha: ObjectId::null(Kind::Sha1),
+            next_run: Instant::now(),
+            worker: None,
+        })
+        .collect())
+}
+
+fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
+    let url = Url::try_from(opts.url.clone().unwrap()).map_err(GitOpsError::InvalidUrl)?;
     let mut environment = HashMap::new();
     for env in &opts.environment {
         let (key, val) = env
@@ -260,14 +309,16 @@ fn task_from_opts(opts: &CliOptions) -> Result<Task, GitOpsError> {
         environment.insert(key.to_owned(), val.to_owned());
     }
     let action = Action {
-        name: opts.action.clone(),
+        name: opts.action.clone().unwrap(),
         entrypoint: "/bin/sh".to_string(),
-        args: vec!["-c".to_string(), opts.action.clone()],
+        args: vec!["-c".to_string(), opts.action.clone().unwrap()],
         environment,
-        timeout: Duration::from_secs_f32(opts.timeout),
+        timeout: opts
+            .timeout
+            .map_or(default_timeout(), Duration::from_secs_f32),
     };
     let actions = vec![action];
-    Ok(Task {
+    Ok(vec![Task {
         config: GitOpsConfig {
             git: GitConfig {
                 url, /* branch: opts.branch.clone() */
@@ -277,17 +328,26 @@ fn task_from_opts(opts: &CliOptions) -> Result<Task, GitOpsError> {
         current_sha: ObjectId::null(Kind::Sha1),
         next_run: Instant::now(),
         worker: None,
-    })
+    }])
 }
 
 fn main() -> Result<Infallible, GitOpsError> {
     let opts = CliOptions::parse();
-    let task = task_from_opts(&opts)?;
-    // TODO deserialize tasks from file
+    let mut tasks = if opts.action.is_some() || opts.url.is_some() {
+        if opts.action.is_none() || opts.url.is_none() || opts.config_file.is_some() {
+            return Err(GitOpsError::ConfigConflict);
+        }
+        tasks_from_opts(&opts)?
+    } else {
+        if opts.config_file.is_none() {
+            return Err(GitOpsError::ConfigConflict);
+        }
+        tasks_from_file(&opts)?
+    };
     let (tx, rx) = channel();
     // TODO Handle TERM both here and when running actions
     spawn(move || {
         logging_receiver(&rx);
     });
-    run(&mut [task], &tx)
+    run(&mut tasks, &tx)
 }

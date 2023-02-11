@@ -171,6 +171,7 @@ dependencies = [
  "castaway",
  "itoa",
  "ryu",
+ "serde",
 ]
 
 [[package]]
@@ -456,9 +457,7 @@ dependencies = [
 
 [[package]]
 name = "git-actor"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9e5fd7bc63ad527d64584f8d01f99b89c051f5fbb8144b58ae5f812775065cf"
+version = "0.17.1"
 dependencies = [
  "bstr",
  "btoi",
@@ -466,13 +465,12 @@ dependencies = [
  "itoa",
  "nom",
  "quick-error",
+ "serde",
 ]
 
 [[package]]
 name = "git-attributes"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2c9687a890892650e8574e123b4b633d277b99953cb877dc02aba852a0139fa"
+version = "0.8.2"
 dependencies = [
  "bstr",
  "compact_str",
@@ -480,42 +478,35 @@ dependencies = [
  "git-glob",
  "git-path",
  "git-quote",
+ "serde",
  "thiserror",
  "unicode-bom",
 ]
 
 [[package]]
 name = "git-bitmap"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44304093ac66a0ada1b243c15c3a503a165a1d0f50bec748f4e5a9b84a0d0722"
+version = "0.2.1"
 dependencies = [
  "quick-error",
 ]
 
 [[package]]
 name = "git-chunk"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3090baa2f4a3fe488a9b3e31090b83259aaf930bf0634af34c18117274f8f1a8"
+version = "0.4.1"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "git-command"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a19fe1efc0b4969b2b2a14621f6cf6a007cf6cbabcf344e078271b65d1f7cef"
+version = "0.2.3"
 dependencies = [
  "bstr",
 ]
 
 [[package]]
 name = "git-config"
-version = "0.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "500cc0517781f9f573c4dc26feb3ae0cdc28ae7160a81ef104590943984f6a8e"
+version = "0.16.0"
 dependencies = [
  "bstr",
  "git-config-value",
@@ -534,9 +525,7 @@ dependencies = [
 
 [[package]]
 name = "git-config-value"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "989a90c1c630513a153c685b4249b96fdf938afc75bf7ef2ae1ccbd3d799f5db"
+version = "0.10.1"
 dependencies = [
  "bitflags",
  "bstr",
@@ -547,9 +536,7 @@ dependencies = [
 
 [[package]]
 name = "git-credentials"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97cd6bbe001afd6356b35ef13f2a6b0f0abc0133d1b2ecaec1033bdd769616d6"
+version = "0.9.1"
 dependencies = [
  "bstr",
  "git-command",
@@ -558,26 +545,24 @@ dependencies = [
  "git-prompt",
  "git-sec",
  "git-url",
+ "serde",
  "thiserror",
 ]
 
 [[package]]
 name = "git-date"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3777ed3a92334193bc5032d468dee2ddb7d1101263e58e0d2edcc308c06948b5"
+version = "0.4.2"
 dependencies = [
  "bstr",
  "itoa",
+ "serde",
  "thiserror",
  "time",
 ]
 
 [[package]]
 name = "git-diff"
-version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca87474422d26d606d04cec6bedfabcd92a0a74102cd7936785358ced6a4a25a"
+version = "0.26.1"
 dependencies = [
  "git-hash",
  "git-object",
@@ -587,9 +572,7 @@ dependencies = [
 
 [[package]]
 name = "git-discover"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2738a9941f1411cff31e6ea4399a6c7304cc3ea34fb8c1c6f1aef1f667d46cc"
+version = "0.13.0"
 dependencies = [
  "bstr",
  "git-hash",
@@ -601,9 +584,7 @@ dependencies = [
 
 [[package]]
 name = "git-features"
-version = "0.26.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0019327672cb759f851d1b18fdcc36bb797dc62b925cb93c8c881b54735eb2c2"
+version = "0.26.2"
 dependencies = [
  "bytes",
  "crc32fast",
@@ -624,29 +605,25 @@ dependencies = [
 
 [[package]]
 name = "git-glob"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa73cf9c9c1a66e28de1cf250fc1ebe323e7c7c59768c1a2331e3b3308e783a3"
+version = "0.5.3"
 dependencies = [
  "bitflags",
  "bstr",
+ "serde",
 ]
 
 [[package]]
 name = "git-hash"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1532d82bf830532f8d545c5b7b568e311e3593f16cf7ee9dd0ce03c74b12b99d"
+version = "0.10.2"
 dependencies = [
  "hex",
+ "serde",
  "thiserror",
 ]
 
 [[package]]
 name = "git-hashtable"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c52b625ad8cc360a0b7f426266f21fb07bd49b8f4ccf1b3ca7bc89424db1dec4"
+version = "0.1.1"
 dependencies = [
  "git-hash",
  "hashbrown 0.13.2",
@@ -654,9 +631,7 @@ dependencies = [
 
 [[package]]
 name = "git-index"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b82fd3d70ed6fbceb7573f145fbf79371e4d0c8dbdf7ad46f3a03328239ddda7"
+version = "0.12.3"
 dependencies = [
  "atoi",
  "bitflags",
@@ -670,15 +645,14 @@ dependencies = [
  "git-traverse",
  "itoa",
  "memmap2",
+ "serde",
  "smallvec",
  "thiserror",
 ]
 
 [[package]]
 name = "git-lock"
-version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7cf6a3c9d1a9932bb9bcb7e0044e2e429f9d94711969a7d2a09e34ae21f6437"
+version = "3.0.2"
 dependencies = [
  "fastrand",
  "git-tempfile",
@@ -687,20 +661,17 @@ dependencies = [
 
 [[package]]
 name = "git-mailmap"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1957f2f550e345f70cb0615d390fb0446d41eeb5bc87824b7bae31efd8cfc2da"
+version = "0.9.2"
 dependencies = [
  "bstr",
  "git-actor",
  "quick-error",
+ "serde",
 ]
 
 [[package]]
 name = "git-object"
-version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f8563e2d6f524d7053f3106714f99ecdc3adbba2cb7108c09d71a02579f2e19"
+version = "0.26.1"
 dependencies = [
  "bstr",
  "btoi",
@@ -711,15 +682,14 @@ dependencies = [
  "hex",
  "itoa",
  "nom",
+ "serde",
  "smallvec",
  "thiserror",
 ]
 
 [[package]]
 name = "git-odb"
-version = "0.40.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b43514e1d1062613352a10f96d48e69967f4c420776596e1af9a6f368df2eea2"
+version = "0.40.2"
 dependencies = [
  "arc-swap",
  "git-features",
@@ -729,15 +699,14 @@ dependencies = [
  "git-path",
  "git-quote",
  "parking_lot 0.12.1",
+ "serde",
  "tempfile",
  "thiserror",
 ]
 
 [[package]]
 name = "git-pack"
-version = "0.30.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e124d13e4e4b53ca7544e9786f30dafe2e76b4a75ba62b2156ee0656b356c71"
+version = "0.30.2"
 dependencies = [
  "bytesize",
  "clru",
@@ -753,6 +722,7 @@ dependencies = [
  "git-traverse",
  "memmap2",
  "parking_lot 0.12.1",
+ "serde",
  "smallvec",
  "thiserror",
  "uluru",
@@ -760,9 +730,7 @@ dependencies = [
 
 [[package]]
 name = "git-packetline"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a287d600832bc9f0bf704f38ca29f87badd099b82a92c651149e56e28581caa6"
+version = "0.14.2"
 dependencies = [
  "bstr",
  "hex",
@@ -771,9 +739,7 @@ dependencies = [
 
 [[package]]
 name = "git-path"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e40e68481a06da243d3f4dfd86a4be39c24eefb535017a862e845140dcdb878a"
+version = "0.7.1"
 dependencies = [
  "bstr",
  "thiserror",
@@ -781,9 +747,7 @@ dependencies = [
 
 [[package]]
 name = "git-prompt"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad3f84ec28896f6a4b3f3174a1125117ac91788b1c64d96f25eabcd8d01cc7e3"
+version = "0.3.2"
 dependencies = [
  "git-command",
  "git-config-value",
@@ -794,9 +758,7 @@ dependencies = [
 
 [[package]]
 name = "git-protocol"
-version = "0.26.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6927e1f27894a7624855e1fb6ac0665c044d44fe2790717cf49cf1a048f38236"
+version = "0.26.3"
 dependencies = [
  "bstr",
  "btoi",
@@ -806,14 +768,13 @@ dependencies = [
  "git-transport",
  "maybe-async",
  "nom",
+ "serde",
  "thiserror",
 ]
 
 [[package]]
 name = "git-quote"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dd11f4e7f251ab297545faa4c5a4517f4985a43b9c16bf96fa49107f58e837f"
+version = "0.4.1"
 dependencies = [
  "bstr",
  "btoi",
@@ -822,9 +783,7 @@ dependencies = [
 
 [[package]]
 name = "git-ref"
-version = "0.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a2c29bab109acaf626d49a54f1f85ab7f0911268fbf62c2b39680ef4ef19069"
+version = "0.24.0"
 dependencies = [
  "git-actor",
  "git-features",
@@ -836,14 +795,13 @@ dependencies = [
  "git-validate",
  "memmap2",
  "nom",
+ "serde",
  "thiserror",
 ]
 
 [[package]]
 name = "git-refspec"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "419fba469ca7dca4746de8b2be6a21990b276f3974acaa94314f39d4c2bbfc0a"
+version = "0.7.2"
 dependencies = [
  "bstr",
  "git-hash",
@@ -855,9 +813,7 @@ dependencies = [
 
 [[package]]
 name = "git-repository"
-version = "0.33.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a958d3fa83660d15c6535765477a8895156bdd6a922dbd0fc445afa42f4b534"
+version = "0.34.0"
 dependencies = [
  "git-actor",
  "git-attributes",
@@ -893,6 +849,7 @@ dependencies = [
  "once_cell",
  "prodash",
  "reqwest",
+ "serde",
  "signal-hook",
  "smallvec",
  "thiserror",
@@ -901,36 +858,32 @@ dependencies = [
 
 [[package]]
 name = "git-revision"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfc3f7c901777f8318f059dbdf73dbda05acdb36c631fe12465bd955e230a205"
+version = "0.10.2"
 dependencies = [
  "bstr",
  "git-date",
  "git-hash",
  "git-hashtable",
  "git-object",
+ "serde",
  "thiserror",
 ]
 
 [[package]]
 name = "git-sec"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6696a816445a51f76995d579a3122f98247377cc45cd681764f740f3a2666004"
+version = "0.6.2"
 dependencies = [
  "bitflags",
  "dirs",
  "git-path",
  "libc",
+ "serde",
  "windows",
 ]
 
 [[package]]
 name = "git-tempfile"
-version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d851911a2b043dc1ab6cd5432ce7a3ee3a2fd614ed87428cec1b15f5abb7e0c"
+version = "3.0.2"
 dependencies = [
  "dashmap",
  "libc",
@@ -942,9 +895,7 @@ dependencies = [
 
 [[package]]
 name = "git-transport"
-version = "0.25.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa69808d5793b63121b6fcb404c4e1bfe0fdee0f0773d1db54c43d9f75e9b28a"
+version = "0.25.4"
 dependencies = [
  "base64",
  "bstr",
@@ -952,17 +903,17 @@ dependencies = [
  "git-credentials",
  "git-features",
  "git-packetline",
+ "git-quote",
  "git-sec",
  "git-url",
  "reqwest",
+ "serde",
  "thiserror",
 ]
 
 [[package]]
 name = "git-traverse"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd356da21ec00f69b9d4f105df4cb85543c746b18f4b7fc81529ce77713cdb29"
+version = "0.22.1"
 dependencies = [
  "git-hash",
  "git-hashtable",
@@ -972,23 +923,20 @@ dependencies = [
 
 [[package]]
 name = "git-url"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc9a3df0498c511cf34739eab2692352939b54075c2fc96e8f688d402f3f1250"
+version = "0.13.2"
 dependencies = [
  "bstr",
  "git-features",
  "git-path",
  "home",
+ "serde",
  "thiserror",
  "url",
 ]
 
 [[package]]
 name = "git-validate"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0431cf9352c596dc7c8ec9066ee551ce54e63c86c3c767e5baf763f6019ff3c2"
+version = "0.7.2"
 dependencies = [
  "bstr",
  "thiserror",
@@ -996,9 +944,7 @@ dependencies = [
 
 [[package]]
 name = "git-worktree"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c28b292694c98bba8225c39d4e86605843882ba7117ca98491841761e710547"
+version = "0.12.2"
 dependencies = [
  "bstr",
  "git-attributes",
@@ -1264,9 +1210,10 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "git-repository",
+ "serde",
+ "serde_yaml",
  "tempfile",
  "thiserror",
- "url",
 ]
 
 [[package]]
@@ -1842,6 +1789,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml"
+version = "0.9.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fb06d4b6cdaef0e0c51fa881acb721bed3c924cfaa71d9c94a3b771dfdf6567"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "sha1_smol"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1880,6 +1840,9 @@ name = "smallvec"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a507befe795404456341dfab10cef66ead4c041f62b8b11bbb92bffe5d0953e0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "socket2"
@@ -2111,6 +2074,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "unsafe-libyaml"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc7ed8ba44ca06be78ea1ad2c3682a43349126c8818054231ee6f4748012aed2"
+
+[[package]]
 name = "url"
 version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2119,7 +2088,6 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
- "serde",
 ]
 
 [[package]]
