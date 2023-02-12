@@ -95,6 +95,8 @@ struct Action {
     args: Vec<String>,
     #[serde(default)]
     environment: HashMap<String, String>,
+    #[serde(default)]
+    inherit_environment: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -113,7 +115,12 @@ enum ActionOutput {
 fn build_command(action: &Action, cwd: &Path) -> Command {
     let mut command = Command::new(action.entrypoint.clone());
     command.args(action.args.clone());
-    // TODO command.env_clear() ?
+    if !action.inherit_environment {
+        command.env_clear();
+        if let Ok(path) = std::env::var("PATH") {
+            command.env("PATH", path);
+        }
+    }
     command.envs(action.environment.iter());
     command.current_dir(cwd);
     command.stdout(Stdio::piped());
@@ -328,6 +335,7 @@ fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
         entrypoint: "/bin/sh".to_string(),
         args: vec!["-c".to_string(), opts.action.clone().unwrap()],
         environment,
+        inherit_environment: false,
     };
     let actions = vec![action];
     Ok(vec![Task {
