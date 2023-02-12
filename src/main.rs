@@ -10,10 +10,10 @@ use std::{
     path::Path,
     process::{Command, ExitStatus, Stdio},
     sync::{
-        atomic::AtomicBool,
+        atomic::{AtomicBool, Ordering},
         mpsc::{channel, Receiver, SendError, Sender},
     },
-    thread::{sleep, spawn, JoinHandle},
+    thread::{scope, sleep, spawn, JoinHandle},
     time::{Duration, Instant},
 };
 use thiserror::Error;
@@ -64,6 +64,8 @@ struct ConfigFile {
 struct GitOpsConfig {
     git: GitConfig,
     actions: Vec<Action>,
+    #[serde(default = "default_timeout")]
+    timeout: Duration,
 }
 
 fn url_from_string<'de, D>(deserializer: D) -> Result<Url, D::Error>
@@ -93,8 +95,6 @@ struct Action {
     args: Vec<String>,
     #[serde(default)]
     environment: HashMap<String, String>,
-    #[serde(default = "default_timeout")]
-    timeout: Duration,
 }
 
 #[derive(Clone, Copy)]
@@ -144,12 +144,11 @@ fn run_action(
     name: &str,
     action: &Action,
     cwd: &Path,
+    deadline: Instant,
     tx: &Sender<ActionOutput>,
 ) -> Result<(), GitOpsError> {
     let mut command = build_command(action, cwd);
     let mut child = command.spawn().map_err(GitOpsError::ActionError)?;
-    // TODO Coordinate deadline with fetch
-    let deadline = Instant::now() + action.timeout;
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
     // TODO Proper cleanup; break read threads, et c
@@ -174,16 +173,31 @@ fn run_action(
 
 // TODO SSH support
 // TODO branch support
-fn fetch_repo(config: GitConfig, target: &Path) -> Result<ObjectId, GitOpsError> {
+fn fetch_repo(
+    config: GitConfig,
+    deadline: Instant,
+    target: &Path,
+) -> Result<ObjectId, GitOpsError> {
     let should_interrupt = AtomicBool::new(false);
-    let progress = git_repository::progress::Discard;
-    let (mut checkout, _) = git_repository::prepare_clone(config.url, target)
-        .unwrap()
-        .fetch_then_checkout(progress, &should_interrupt)
-        .map_err(GitOpsError::InitRepo)?;
-    let (repository, _) = checkout
-        .main_worktree(Discard, &should_interrupt)
-        .map_err(GitOpsError::CheckoutRepo)?;
+    let cancel = AtomicBool::new(false);
+    let repository = scope(|s| {
+        s.spawn(|| {
+            while Instant::now() < deadline && !cancel.load(Ordering::Relaxed) {
+                sleep(Duration::from_secs(1));
+            }
+            should_interrupt.store(true, Ordering::Relaxed);
+        });
+        let progress = git_repository::progress::Discard;
+        let (mut checkout, _) = git_repository::prepare_clone(config.url, target)
+            .unwrap()
+            .fetch_then_checkout(progress, &should_interrupt)
+            .map_err(GitOpsError::InitRepo)?;
+        let (repository, _) = checkout
+            .main_worktree(Discard, &should_interrupt)
+            .map_err(GitOpsError::CheckoutRepo)?;
+        cancel.store(true, Ordering::Relaxed);
+        Ok(repository)
+    })?;
     Ok(repository.head_commit().map(|c| c.id).unwrap())
 }
 
@@ -205,8 +219,9 @@ fn run(tasks: &mut [Task], tx: &Sender<ActionOutput>) -> Result<Infallible, GitO
                 .map_err(GitOpsError::WorkDir)?
                 .into_path();
             let task_tx = tx.clone();
+            let deadline = Instant::now() + config.timeout;
             let worker = spawn(move || {
-                let new_sha = fetch_repo(config.git, &workdir)?;
+                let new_sha = fetch_repo(config.git, deadline, &workdir)?;
                 if current_sha != new_sha {
                     task_tx
                         .send(ActionOutput::Changes(
@@ -217,7 +232,7 @@ fn run(tasks: &mut [Task], tx: &Sender<ActionOutput>) -> Result<Infallible, GitO
                         .map_err(GitOpsError::SendError)?;
                     for action in config.actions {
                         let name = format!("{}|{}", reponame, action.name);
-                        run_action(&name, &action, &workdir, &task_tx)?;
+                        run_action(&name, &action, &workdir, deadline, &task_tx)?;
                     }
                 }
                 std::fs::remove_dir_all(workdir).map_err(GitOpsError::WorkDir)?;
@@ -313,9 +328,6 @@ fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
         entrypoint: "/bin/sh".to_string(),
         args: vec!["-c".to_string(), opts.action.clone().unwrap()],
         environment,
-        timeout: opts
-            .timeout
-            .map_or(default_timeout(), Duration::from_secs_f32),
     };
     let actions = vec![action];
     Ok(vec![Task {
@@ -324,6 +336,9 @@ fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
                 url, /* branch: opts.branch.clone() */
             },
             actions,
+            timeout: opts
+                .timeout
+                .map_or(default_timeout(), Duration::from_secs_f32),
         },
         current_sha: ObjectId::null(Kind::Sha1),
         next_run: Instant::now(),
