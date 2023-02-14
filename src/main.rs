@@ -1,5 +1,5 @@
 use clap::Parser;
-use git_repository::{hash::Kind, progress::Discard, ObjectId, Url};
+use gix::{hash::Kind, progress::Discard, ObjectId, Url};
 use serde::{Deserialize, Deserializer};
 use std::{
     collections::HashMap,
@@ -21,7 +21,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 enum GitOpsError {
     #[error("Failed to parse Git repo URL: {0}")]
-    InvalidUrl(git_repository::url::parse::Error),
+    InvalidUrl(gix::url::parse::Error),
     #[error("Failed to parse environment variable: {0}")]
     InvalidEnvVar(String),
     #[error("Config file not found: {0}")]
@@ -33,9 +33,9 @@ enum GitOpsError {
     #[error("Failed to create or locate workdir: {0}")]
     WorkDir(std::io::Error),
     #[error("Failed to create new repository: {0}")]
-    InitRepo(git_repository::clone::fetch::Error),
+    InitRepo(gix::clone::fetch::Error),
     #[error("Failed to fetch from remote: {0}")]
-    CheckoutRepo(git_repository::clone::checkout::main_worktree::Error),
+    CheckoutRepo(gix::clone::checkout::main_worktree::Error),
     #[error("Failed to send event: {0}")]
     SendError(SendError<ActionOutput>),
     #[error("Failed to launch action: {0}")]
@@ -194,8 +194,8 @@ fn fetch_repo(
             }
             should_interrupt.store(true, Ordering::Relaxed);
         });
-        let progress = git_repository::progress::Discard;
-        let (mut checkout, _) = git_repository::prepare_clone(config.url, target)
+        let progress = gix::progress::Discard;
+        let (mut checkout, _) = gix::prepare_clone(config.url, target)
             .unwrap()
             .fetch_then_checkout(progress, &should_interrupt)
             .map_err(GitOpsError::InitRepo)?;
