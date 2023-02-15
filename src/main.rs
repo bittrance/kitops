@@ -48,11 +48,25 @@ impl GitOpsError {
         true
     }
 }
+
 struct Task {
     config: GitOpsConfig,
+    state: State,
+    worker: Option<JoinHandle<Result<ObjectId, GitOpsError>>>,
+}
+
+struct State {
     next_run: Instant,
     current_sha: ObjectId,
-    worker: Option<JoinHandle<Result<ObjectId, GitOpsError>>>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            current_sha: ObjectId::null(Kind::Sha1),
+            next_run: Instant::now(),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -209,7 +223,7 @@ fn fetch_repo(
 }
 
 fn eligible_task(task: &Task) -> bool {
-    task.worker.is_none() && task.next_run < Instant::now()
+    task.worker.is_none() && task.state.next_run < Instant::now()
 }
 
 fn finished_task(task: &Task) -> bool {
@@ -221,7 +235,7 @@ fn run(tasks: &mut [Task], tx: &Sender<ActionOutput>) -> Result<Infallible, GitO
         if let Some(mut task) = tasks.iter_mut().find(|t| eligible_task(t)) {
             let config = task.config.clone();
             let reponame = config.git.url.path.to_string();
-            let current_sha = task.current_sha;
+            let current_sha = task.state.current_sha;
             let workdir = tempfile::tempdir()
                 .map_err(GitOpsError::WorkDir)?
                 .into_path();
@@ -246,13 +260,13 @@ fn run(tasks: &mut [Task], tx: &Sender<ActionOutput>) -> Result<Infallible, GitO
                 Ok(new_sha)
             });
             task.worker = Some(worker);
-            task.next_run = Instant::now().add(Duration::from_secs(60));
+            task.state.next_run = Instant::now().add(Duration::from_secs(60));
             continue;
         }
         if let Some(mut task) = tasks.iter_mut().find(|t| finished_task(t)) {
             let worker = task.worker.take().unwrap();
             match worker.join().unwrap() {
-                Ok(new_sha) => task.current_sha = new_sha,
+                Ok(new_sha) => task.state.current_sha = new_sha,
                 Err(err) if err.is_fatal() => return Err(err),
                 Err(_) => (),
             }
@@ -314,8 +328,7 @@ fn tasks_from_file(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
         .into_iter()
         .map(|c| Task {
             config: c,
-            current_sha: ObjectId::null(Kind::Sha1),
-            next_run: Instant::now(),
+            state: Default::default(),
             worker: None,
         })
         .collect())
@@ -348,8 +361,7 @@ fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
                 .timeout
                 .map_or(default_timeout(), Duration::from_secs_f32),
         },
-        current_sha: ObjectId::null(Kind::Sha1),
-        next_run: Instant::now(),
+        state: Default::default(),
         worker: None,
     }])
 }
