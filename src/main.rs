@@ -76,6 +76,7 @@ struct ConfigFile {
 
 #[derive(Clone, Deserialize)]
 struct GitOpsConfig {
+    name: String,
     git: GitConfig,
     actions: Vec<Action>,
     #[serde(default = "default_timeout")]
@@ -230,43 +231,59 @@ fn finished_task(task: &Task) -> bool {
     task.worker.as_ref().map(JoinHandle::is_finished).is_some()
 }
 
-fn run(tasks: &mut [Task], tx: &Sender<ActionOutput>) -> Result<Infallible, GitOpsError> {
+fn start_task(
+    task: &Task,
+    tx: Sender<ActionOutput>,
+) -> Result<JoinHandle<Result<ObjectId, GitOpsError>>, GitOpsError> {
+    let config = task.config.clone();
+    let current_sha = task.state.current_sha;
+    let workdir = tempfile::tempdir()
+        .map_err(GitOpsError::WorkDir)?
+        .into_path();
+    let deadline = Instant::now() + config.timeout;
+    let worker = spawn(move || {
+        let new_sha = fetch_repo(config.git, deadline, &workdir)?;
+        if current_sha != new_sha {
+            tx.send(ActionOutput::Changes(
+                config.name.clone(),
+                current_sha,
+                new_sha,
+            ))
+            .map_err(GitOpsError::SendError)?;
+            for action in config.actions {
+                let name = format!("{}|{}", config.name, action.name);
+                run_action(&name, &action, &workdir, deadline, &tx)?;
+            }
+        }
+        std::fs::remove_dir_all(workdir).map_err(GitOpsError::WorkDir)?;
+        Ok(new_sha)
+    });
+    Ok(worker)
+}
+
+fn run<F>(
+    tasks: &mut [Task],
+    persist: F,
+    tx: &Sender<ActionOutput>,
+) -> Result<Infallible, GitOpsError>
+where
+    F: Fn(&Task) -> Result<(), GitOpsError>,
+{
     loop {
-        if let Some(mut task) = tasks.iter_mut().find(|t| eligible_task(t)) {
-            let config = task.config.clone();
-            let reponame = config.git.url.path.to_string();
-            let current_sha = task.state.current_sha;
-            let workdir = tempfile::tempdir()
-                .map_err(GitOpsError::WorkDir)?
-                .into_path();
+        if let Some(task) = tasks.iter_mut().find(|t| eligible_task(t)) {
             let task_tx = tx.clone();
-            let deadline = Instant::now() + config.timeout;
-            let worker = spawn(move || {
-                let new_sha = fetch_repo(config.git, deadline, &workdir)?;
-                if current_sha != new_sha {
-                    task_tx
-                        .send(ActionOutput::Changes(
-                            reponame.clone(),
-                            current_sha,
-                            new_sha,
-                        ))
-                        .map_err(GitOpsError::SendError)?;
-                    for action in config.actions {
-                        let name = format!("{}|{}", reponame, action.name);
-                        run_action(&name, &action, &workdir, deadline, &task_tx)?;
-                    }
-                }
-                std::fs::remove_dir_all(workdir).map_err(GitOpsError::WorkDir)?;
-                Ok(new_sha)
-            });
-            task.worker = Some(worker);
+            task.worker = Some(start_task(task, task_tx)?);
             task.state.next_run = Instant::now().add(Duration::from_secs(60));
+            persist(task)?;
             continue;
         }
         if let Some(mut task) = tasks.iter_mut().find(|t| finished_task(t)) {
             let worker = task.worker.take().unwrap();
             match worker.join().unwrap() {
-                Ok(new_sha) => task.state.current_sha = new_sha,
+                Ok(new_sha) => {
+                    task.state.current_sha = new_sha;
+                    persist(task)?;
+                }
                 Err(err) if err.is_fatal() => return Err(err),
                 Err(_) => (),
             }
@@ -353,6 +370,7 @@ fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
     let actions = vec![action];
     Ok(vec![Task {
         config: GitOpsConfig {
+            name: url.path.to_string(),
             git: GitConfig {
                 url, /* branch: opts.branch.clone() */
             },
@@ -384,5 +402,5 @@ fn main() -> Result<Infallible, GitOpsError> {
     spawn(move || {
         logging_receiver(&rx);
     });
-    run(&mut tasks, &tx)
+    run(&mut tasks, |_t: &Task| Ok(()), &tx)
 }
