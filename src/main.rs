@@ -1,20 +1,20 @@
 use clap::Parser;
 use gix::{hash::Kind, progress::Discard, ObjectId, Url};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     convert::Infallible,
     fs::File,
     io::Read,
     ops::Add,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, ExitStatus, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{channel, Receiver, SendError, Sender},
     },
     thread::{scope, sleep, spawn, JoinHandle},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 use thiserror::Error;
 
@@ -30,6 +30,14 @@ enum GitOpsError {
     MalformedConfig(serde_yaml::Error),
     #[error("Provide --url and --action or --config-file")]
     ConfigConflict,
+    #[error("Failed to open/create state file: {0}")]
+    StateFile(std::io::Error),
+    #[error("Falied to read state: {0}")]
+    LoadingState(std::io::Error),
+    #[error("Failed to write state: {0}")]
+    SavingState(std::io::Error),
+    #[error("Failed to de/serialize state: {0}")]
+    SerdeState(serde_yaml::Error),
     #[error("Failed to create or locate workdir: {0}")]
     WorkDir(std::io::Error),
     #[error("Failed to create new repository: {0}")]
@@ -55,8 +63,15 @@ struct Task {
     worker: Option<JoinHandle<Result<ObjectId, GitOpsError>>>,
 }
 
+impl Task {
+    fn id(&self) -> String {
+        format!("{}", self.config.git.url.to_bstring())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct State {
-    next_run: Instant,
+    next_run: SystemTime,
     current_sha: ObjectId,
 }
 
@@ -64,7 +79,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             current_sha: ObjectId::null(Kind::Sha1),
-            next_run: Instant::now(),
+            next_run: SystemTime::now(),
         }
     }
 }
@@ -224,7 +239,7 @@ fn fetch_repo(
 }
 
 fn eligible_task(task: &Task) -> bool {
-    task.worker.is_none() && task.state.next_run < Instant::now()
+    task.worker.is_none() && task.state.next_run < SystemTime::now()
 }
 
 fn finished_task(task: &Task) -> bool {
@@ -263,17 +278,17 @@ fn start_task(
 
 fn run<F>(
     tasks: &mut [Task],
-    persist: F,
+    mut persist: F,
     tx: &Sender<ActionOutput>,
 ) -> Result<Infallible, GitOpsError>
 where
-    F: Fn(&Task) -> Result<(), GitOpsError>,
+    F: FnMut(&Task) -> Result<(), GitOpsError>,
 {
     loop {
         if let Some(task) = tasks.iter_mut().find(|t| eligible_task(t)) {
             let task_tx = tx.clone();
             task.worker = Some(start_task(task, task_tx)?);
-            task.state.next_run = Instant::now().add(Duration::from_secs(60));
+            task.state.next_run = SystemTime::now().add(Duration::from_secs(60));
             persist(task)?;
             continue;
         }
@@ -315,6 +330,9 @@ fn logging_receiver(events: &Receiver<ActionOutput>) {
 
 #[derive(Parser)]
 struct CliOptions {
+    /// Path where state is stored
+    #[clap(long)]
+    state_file: Option<PathBuf>,
     /// YAML format task descriptions
     #[clap(long)]
     config_file: Option<String>,
@@ -345,7 +363,7 @@ fn tasks_from_file(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
         .into_iter()
         .map(|c| Task {
             config: c,
-            state: Default::default(),
+            state: State::default(),
             worker: None,
         })
         .collect())
@@ -379,9 +397,49 @@ fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
                 .timeout
                 .map_or(default_timeout(), Duration::from_secs_f32),
         },
-        state: Default::default(),
+        state: State::default(),
         worker: None,
     }])
+}
+
+trait Store {
+    fn get(&self, id: &str) -> Option<&State>;
+    fn retain(&mut self, task_ids: HashSet<String>);
+    fn persist(&mut self, task: &Task) -> Result<(), GitOpsError>;
+}
+
+#[derive(Debug, Default)]
+struct FileStore {
+    path: PathBuf,
+    state: HashMap<String, State>,
+}
+
+impl FileStore {
+    fn from_file(path: PathBuf) -> Result<Self, GitOpsError> {
+        let state = if path.try_exists().map_err(GitOpsError::StateFile)? {
+            let file = File::open(&path).map_err(GitOpsError::LoadingState)?;
+            serde_yaml::from_reader(file).map_err(GitOpsError::SerdeState)?
+        } else {
+            HashMap::new()
+        };
+        Ok(FileStore { path, state })
+    }
+}
+
+impl Store for FileStore {
+    fn get(&self, id: &str) -> Option<&State> {
+        self.state.get(id)
+    }
+
+    fn retain(&mut self, task_ids: HashSet<String>) {
+        self.state.retain(|id, _| task_ids.contains(id));
+    }
+
+    fn persist(&mut self, task: &Task) -> Result<(), GitOpsError> {
+        self.state.insert(task.id(), task.state.clone());
+        let file = File::create(&self.path).map_err(GitOpsError::SavingState)?;
+        serde_yaml::to_writer(file, &self.state).map_err(GitOpsError::SerdeState)
+    }
 }
 
 fn main() -> Result<Infallible, GitOpsError> {
@@ -402,5 +460,16 @@ fn main() -> Result<Infallible, GitOpsError> {
     spawn(move || {
         logging_receiver(&rx);
     });
-    run(&mut tasks, |_t: &Task| Ok(()), &tx)
+    let state_path = opts
+        .state_file
+        .unwrap_or_else(|| PathBuf::from("./state.yaml".to_string()));
+    let mut store = FileStore::from_file(state_path)?;
+    let task_ids = tasks.iter().map(Task::id).collect::<HashSet<_>>();
+    store.retain(task_ids);
+    for task in &mut tasks {
+        if let Some(s) = store.get(&task.id()) {
+            task.state = s.clone();
+        }
+    }
+    run(&mut tasks, |t: &Task| store.persist(t), &tx)
 }
