@@ -94,6 +94,8 @@ struct GitOpsConfig {
     name: String,
     git: GitConfig,
     actions: Vec<Action>,
+    #[serde(default = "default_interval")]
+    interval: Duration,
     #[serde(default = "default_timeout")]
     timeout: Duration,
 }
@@ -104,6 +106,10 @@ where
 {
     let s: String = Deserialize::deserialize(deserializer)?;
     Url::try_from(s).map_err(serde::de::Error::custom)
+}
+
+fn default_interval() -> Duration {
+    Duration::from_secs(60)
 }
 
 fn default_timeout() -> Duration {
@@ -288,7 +294,7 @@ where
         if let Some(task) = tasks.iter_mut().find(|t| eligible_task(t)) {
             let task_tx = tx.clone();
             task.worker = Some(start_task(task, task_tx)?);
-            task.state.next_run = SystemTime::now().add(Duration::from_secs(60));
+            task.state.next_run = SystemTime::now().add(task.config.interval);
             persist(task)?;
             continue;
         }
@@ -348,6 +354,9 @@ struct CliOptions {
     /// Environment variable for action
     #[clap(long)]
     environment: Vec<String>,
+    /// Check repo for changes at this interval
+    #[clap(long)]
+    interval: Option<f32>,
     /// Max run time for repo fetch plus action in seconds
     #[clap(long)]
     timeout: Option<f32>,
@@ -393,6 +402,9 @@ fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
                 url, /* branch: opts.branch.clone() */
             },
             actions,
+            interval: opts
+                .interval
+                .map_or(default_interval(), Duration::from_secs_f32),
             timeout: opts
                 .timeout
                 .map_or(default_timeout(), Duration::from_secs_f32),
