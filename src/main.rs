@@ -214,7 +214,6 @@ fn run_action(
     Ok(())
 }
 
-// TODO SSH support
 // TODO branch support
 fn fetch_repo(
     config: GitConfig,
