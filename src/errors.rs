@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -12,6 +14,8 @@ pub enum GitOpsError {
     MalformedConfig(serde_yaml::Error),
     #[error("Provide --url and --action or --config-file")]
     ConfigConflict,
+    #[error("Cannot find directory to store repositories: {0}")]
+    MissingRepoDir(PathBuf),
     #[error("Failed to open/create state file: {0}")]
     StateFile(std::io::Error),
     #[error("Falied to read state: {0}")]
@@ -24,8 +28,10 @@ pub enum GitOpsError {
     WorkDir(std::io::Error),
     #[error("Failed to create new repository: {0}")]
     InitRepo(gix::clone::fetch::Error),
-    #[error("Failed to fetch from remote: {0}")]
-    CheckoutRepo(gix::clone::checkout::main_worktree::Error),
+    #[error("Failed to connect to remote: {0}")]
+    FetchError(Box<dyn std::error::Error + Send + Sync>),
+    #[error("Failed to open repository: {0}")]
+    OpenRepo(gix::open::Error),
     #[error("Failed to send event: {0}")]
     SendError(String),
     #[error("Failed to launch action: {0}")]

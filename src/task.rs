@@ -1,5 +1,6 @@
 use std::{
     ops::Add,
+    path::PathBuf,
     sync::mpsc::Sender,
     thread::{spawn, JoinHandle},
     time::{Duration, Instant, SystemTime},
@@ -11,21 +12,28 @@ use serde::{Deserialize, Serialize};
 use crate::{
     actions::{run_action, Action},
     errors::GitOpsError,
-    git::{fetch_repo, GitConfig},
+    git::{ensure_worktree, GitConfig},
     opts::CliOptions,
     receiver::ActionOutput,
 };
 
 pub struct Task {
     config: GitOpsConfig,
+    repo_dir: PathBuf,
     pub state: State,
     worker: Option<JoinHandle<Result<ObjectId, GitOpsError>>>,
 }
 
 impl Task {
-    pub fn from_config(config: GitOpsConfig) -> Self {
+    pub fn from_config(config: GitOpsConfig, opts: &CliOptions) -> Self {
+        let repo_dir = opts
+            .repo_dir
+            .as_ref()
+            .map(|dir| dir.join(config.git.safe_url()))
+            .unwrap();
         Task {
             config,
+            repo_dir,
             state: State::default(),
             worker: None,
         }
@@ -54,12 +62,13 @@ impl Task {
         let task_id = self.id();
         let config = self.config.clone();
         let current_sha = self.state.current_sha;
+        let repodir = self.repo_dir.clone();
         let workdir = tempfile::tempdir()
             .map_err(GitOpsError::WorkDir)?
             .into_path();
         let deadline = Instant::now() + config.timeout;
         let worker = spawn(move || {
-            let new_sha = fetch_repo(config.git, deadline, &workdir)?;
+            let new_sha = ensure_worktree(&config.git, deadline, &repodir, &workdir)?;
             if current_sha != new_sha {
                 tx.send(ActionOutput::Changes(
                     config.name.clone(),

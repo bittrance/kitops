@@ -54,7 +54,18 @@ where
 }
 
 fn main() -> Result<Infallible, GitOpsError> {
-    let opts = CliOptions::parse();
+    let mut opts = CliOptions::parse();
+    if let Some(ref dir) = opts.repo_dir {
+        if !dir.exists() {
+            return Err(GitOpsError::MissingRepoDir(dir.clone()));
+        }
+    } else {
+        opts.repo_dir = Some(
+            tempfile::tempdir()
+                .map_err(GitOpsError::WorkDir)?
+                .into_path(),
+        );
+    }
     let (tx, rx) = channel();
     // TODO Handle TERM both here and when running actions
     spawn(move || {

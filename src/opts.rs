@@ -18,12 +18,15 @@ pub struct CliOptions {
     /// YAML format task descriptions
     #[clap(long)]
     pub config_file: Option<String>,
+    /// Directory to store git repos in
+    #[clap(long)]
+    pub repo_dir: Option<PathBuf>,
     /// Git repository URL (http(s) for now)
     #[clap(long)]
     pub url: Option<String>,
-    // /// Branch to check out
-    // #[clap(long)]
-    // branch: String,
+    /// Branch to check out
+    #[clap(long, default_value = "main")]
+    pub branch: String,
     /// Command to execute on change (passed to /bin/sh)
     #[clap(long)]
     pub action: Option<String>,
@@ -51,7 +54,7 @@ fn tasks_from_file(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
     Ok(config_file
         .tasks
         .into_iter()
-        .map(Task::from_config)
+        .map(|c| Task::from_config(c, opts))
         .collect())
 }
 
@@ -59,7 +62,7 @@ fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
     let mut config: GitOpsConfig = TryFrom::try_from(opts)?;
     let action: Action = TryFrom::try_from(opts)?;
     config.add_action(action);
-    Ok(vec![Task::from_config(config)])
+    Ok(vec![Task::from_config(config, opts)])
 }
 
 pub fn load_tasks(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
