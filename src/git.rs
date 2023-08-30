@@ -30,11 +30,7 @@ pub struct GitConfig {
 impl GitConfig {
     pub fn safe_url(&self) -> String {
         // TODO Change to whitelist of allowed characters
-        self.url
-            .to_bstring()
-            .to_string()
-            .replace("/", "_")
-            .replace(":", "_")
+        self.url.to_bstring().to_string().replace(['/', ':'], "_")
     }
 }
 
@@ -107,6 +103,7 @@ fn fetch_repo(repo: &Repository, config: &GitConfig, deadline: Instant) -> Resul
     })?;
     if let Status::Change { .. } = outcome.status {
         let needle = BString::from("refs/heads/".to_owned() + &config.branch);
+        // TODO .mappings -> remote_refs?
         let target = outcome
             .ref_map
             .mappings
