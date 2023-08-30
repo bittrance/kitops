@@ -1,9 +1,11 @@
 #![allow(clippy::module_name_repetitions)]
 
 use clap::Parser;
-use errors::GitOpsError;
-use opts::{load_store, load_tasks, CliOptions};
-use receiver::{logging_receiver, ActionOutput};
+use kitops::errors::GitOpsError;
+use kitops::opts::{load_store, load_tasks, CliOptions};
+use kitops::receiver::{logging_receiver, ActionOutput};
+use kitops::store::Store;
+use kitops::task::Task;
 use std::{
     collections::HashSet,
     convert::Infallible,
@@ -11,16 +13,6 @@ use std::{
     thread::{sleep, spawn},
     time::Duration,
 };
-use store::Store;
-use task::Task;
-
-mod actions;
-mod errors;
-mod git;
-mod opts;
-mod receiver;
-mod store;
-mod task;
 
 fn run<F>(
     tasks: &mut [Task],
