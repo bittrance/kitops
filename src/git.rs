@@ -11,7 +11,7 @@ use gix::{
     progress::Discard,
     refs::{
         transaction::{Change, LogChange, RefEdit},
-        FullName, Target,
+        Target,
     },
     remote::{fetch::Status, ref_map::Options, Direction},
     ObjectId, Repository, Url,
@@ -103,15 +103,12 @@ fn fetch_repo(repo: &Repository, config: &GitConfig, deadline: Instant) -> Resul
     })?;
     if let Status::Change { .. } = outcome.status {
         let needle = BString::from("refs/heads/".to_owned() + &config.branch);
-        // TODO .mappings -> remote_refs?
         let target = outcome
             .ref_map
-            .mappings
+            .remote_refs
             .iter()
-            .find(|m| m.remote.as_name() == Some(needle.as_bstr()))
-            .unwrap()
-            .remote
-            .as_id()
+            .map(|r| r.unpack())
+            .find_map(|(name, oid, _)| if name == needle.as_bstr() { oid } else { None })
             .unwrap()
             .to_owned();
         let edit = RefEdit {
@@ -124,7 +121,7 @@ fn fetch_repo(repo: &Repository, config: &GitConfig, deadline: Instant) -> Resul
                 expected: gix::refs::transaction::PreviousValue::Any,
                 new: Target::Peeled(target),
             },
-            name: FullName::try_from(needle).unwrap(),
+            name: needle.try_into().unwrap(),
             deref: false,
         };
         repo.edit_reference(edit).unwrap();
