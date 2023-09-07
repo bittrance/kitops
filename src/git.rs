@@ -13,7 +13,7 @@ use gix::{
         transaction::{Change, LogChange, RefEdit},
         Target,
     },
-    remote::{fetch::Status, ref_map::Options, Direction},
+    remote::{ref_map::Options, Direction},
     ObjectId, Repository, Url,
 };
 use serde::{Deserialize, Deserializer};
@@ -101,31 +101,29 @@ fn fetch_repo(repo: &Repository, config: &GitConfig, deadline: Instant) -> Resul
         cancel.store(true, Ordering::Relaxed);
         Ok(outcome)
     })?;
-    if let Status::Change { .. } = outcome.status {
-        let needle = BString::from("refs/heads/".to_owned() + &config.branch);
-        let target = outcome
-            .ref_map
-            .remote_refs
-            .iter()
-            .map(|r| r.unpack())
-            .find_map(|(name, oid, _)| if name == needle.as_bstr() { oid } else { None })
-            .unwrap()
-            .to_owned();
-        let edit = RefEdit {
-            change: Change::Update {
-                log: LogChange {
-                    mode: gix::refs::transaction::RefLog::AndReference,
-                    force_create_reflog: false,
-                    message: BString::from("kitops fetch"),
-                },
-                expected: gix::refs::transaction::PreviousValue::Any,
-                new: Target::Peeled(target),
+    let needle = BString::from("refs/heads/".to_owned() + &config.branch);
+    let target = outcome
+        .ref_map
+        .remote_refs
+        .iter()
+        .map(|r| r.unpack())
+        .find_map(|(name, oid, _)| if name == needle.as_bstr() { oid } else { None })
+        .unwrap()
+        .to_owned();
+    let edit = RefEdit {
+        change: Change::Update {
+            log: LogChange {
+                mode: gix::refs::transaction::RefLog::AndReference,
+                force_create_reflog: false,
+                message: BString::from("kitops fetch"),
             },
-            name: needle.try_into().unwrap(),
-            deref: false,
-        };
-        repo.edit_reference(edit).unwrap();
-    }
+            expected: gix::refs::transaction::PreviousValue::Any,
+            new: Target::Peeled(target),
+        },
+        name: needle.try_into().unwrap(),
+        deref: false,
+    };
+    repo.edit_reference(edit).unwrap();
     Ok(())
 }
 
