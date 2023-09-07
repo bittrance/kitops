@@ -32,20 +32,14 @@ fn clone_repo_from_github_https() {
     let deadline = Instant::now() + Duration::from_secs(60);
     let repodir = tempfile::tempdir().unwrap();
     let workdir = tempfile::tempdir().unwrap();
-    ensure_worktree(
-        &config,
-        deadline,
-        &repodir.path().join("test-repo"),
-        &workdir.path(),
-    )
-    .unwrap();
+    ensure_worktree(&config, deadline, &repodir, &workdir).unwrap();
     let sh = Shell::new().unwrap();
     sh.set_var("GIT_CONFIG_SYSTEM", "/dev/null");
     sh.set_var("GIT_CONFIG_GLOBAL", "/dev/null");
     sh.change_dir(&workdir);
     let files = cmd!(sh, "ls").read().unwrap();
     assert!(files.contains("Cargo.toml"));
-    sh.change_dir(repodir.path().join("test-repo"));
+    sh.change_dir(&repodir);
     let remotes = cmd!(sh, "git remote -v").read().unwrap();
     assert!(remotes.contains("https://github.com/bittrance/kitops"));
 }

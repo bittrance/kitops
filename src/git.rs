@@ -165,13 +165,19 @@ fn checkout_worktree(
     Ok(oid)
 }
 
-pub fn ensure_worktree(
+pub fn ensure_worktree<P, Q>(
     config: &GitConfig,
     deadline: Instant,
-    repodir: &Path,
-    workdir: &Path,
-) -> Result<ObjectId, GitOpsError> {
-    let repo = if repodir.try_exists().unwrap() {
+    repodir: P,
+    workdir: Q,
+) -> Result<ObjectId, GitOpsError>
+where
+    P: AsRef<Path>,
+    Q: AsRef<Path>,
+{
+    let repodir = repodir.as_ref();
+    let workdir = workdir.as_ref();
+    let repo = if repodir.join(".git").try_exists().unwrap() {
         let repo = gix::open(repodir).map_err(GitOpsError::OpenRepo)?;
         fetch_repo(&repo, config, deadline)?;
         repo
