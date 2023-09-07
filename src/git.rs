@@ -7,6 +7,7 @@ use std::{
 
 use gix::{
     bstr::{BString, ByteSlice},
+    config::tree::User,
     prelude::FindExt,
     progress::Discard,
     refs::{
@@ -178,7 +179,12 @@ where
     let repodir = repodir.as_ref();
     let workdir = workdir.as_ref();
     let repo = if repodir.join(".git").try_exists().unwrap() {
-        let repo = gix::open(repodir).map_err(GitOpsError::OpenRepo)?;
+        let mut repo = gix::open(repodir).map_err(GitOpsError::OpenRepo)?;
+        // TODO Workaround for gitoxide not supporting empty user.email
+        let mut gitconfig = repo.config_snapshot_mut();
+        gitconfig.set_value(&User::NAME, "kitops").unwrap();
+        gitconfig.set_value(&User::EMAIL, "none").unwrap();
+        gitconfig.commit().unwrap();
         fetch_repo(&repo, config, deadline)?;
         repo
     } else {
