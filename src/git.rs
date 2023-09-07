@@ -24,6 +24,7 @@ use crate::{errors::GitOpsError, opts::CliOptions};
 pub struct GitConfig {
     #[serde(deserialize_with = "url_from_string")]
     url: Url,
+    #[serde(default = "GitConfig::default_branch")]
     branch: String,
 }
 
@@ -31,6 +32,10 @@ impl GitConfig {
     pub fn safe_url(&self) -> String {
         // TODO Change to whitelist of allowed characters
         self.url.to_bstring().to_string().replace(['/', ':'], "_")
+    }
+
+    pub fn default_branch() -> String {
+        "main".to_owned()
     }
 }
 

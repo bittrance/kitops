@@ -87,11 +87,9 @@ fn fetch_repo_from_file_url() {
     let upstream = empty_repo(&sh);
     let repodir = clone_repo(&sh, &upstream);
     commit_file(&upstream, "revision 1");
-    let config = serde_yaml::from_str::<GitConfig>(&format!(
-        "url: file://{}\nbranch: main",
-        upstream.path().display()
-    ))
-    .unwrap();
+    let config =
+        serde_yaml::from_str::<GitConfig>(&format!("url: file://{}", upstream.path().display()))
+            .unwrap();
     let deadline = Instant::now() + Duration::from_secs(60);
     let workdir = tempfile::tempdir().unwrap();
     ensure_worktree(&config, deadline, &repodir, &workdir).unwrap();
@@ -116,11 +114,9 @@ fn fetch_repo_with_force_push() {
     commit_file(&upstream, "revision 2");
     let repodir = clone_repo(&sh, &upstream);
     reset_branch(&sh, &upstream, &sha1);
-    let config = serde_yaml::from_str::<GitConfig>(&format!(
-        "url: file://{}\nbranch: main",
-        upstream.path().display()
-    ))
-    .unwrap();
+    let config =
+        serde_yaml::from_str::<GitConfig>(&format!("url: file://{}", upstream.path().display()))
+            .unwrap();
     let deadline = Instant::now() + Duration::from_secs(60);
     let workdir = tempfile::tempdir().unwrap();
     ensure_worktree(&config, deadline, &repodir, &workdir).unwrap();

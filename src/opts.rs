@@ -82,3 +82,16 @@ pub fn load_tasks(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
 pub fn load_store(opts: &CliOptions) -> Result<impl Store, GitOpsError> {
     FileStore::from_file(&opts.state_file)
 }
+
+#[test]
+fn minimum_config() {
+    let config = r#"tasks:
+  - name: testo
+    git:
+      url: https://github.com/bittrance/kitops
+    actions:
+      - name: list files
+        entrypoint: /bin/ls
+"#;
+    serde_yaml::from_str::<ConfigFile>(config).unwrap();
+}
