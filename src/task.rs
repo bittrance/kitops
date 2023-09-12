@@ -17,48 +17,63 @@ use crate::{
     receiver::ActionOutput,
 };
 
-pub struct Task {
+pub trait Task {
+    fn id(&self) -> String;
+    fn is_eligible(&self) -> bool;
+    fn is_running(&self) -> bool;
+    fn is_finished(&self) -> bool;
+    fn schedule_next(&mut self);
+    fn start(&mut self, tx: Sender<ActionOutput>) -> Result<(), GitOpsError>;
+    fn finalize(&mut self) -> Result<(), GitOpsError>;
+    fn state(&self) -> State;
+    fn set_state(&mut self, state: State);
+}
+
+pub struct GitTask {
     config: GitOpsConfig,
     repo_dir: PathBuf,
     pub state: State,
     worker: Option<JoinHandle<Result<ObjectId, GitOpsError>>>,
 }
 
-impl Task {
+impl GitTask {
     pub fn from_config(config: GitOpsConfig, opts: &CliOptions) -> Self {
         let repo_dir = opts
             .repo_dir
             .as_ref()
             .map(|dir| dir.join(config.git.safe_url()))
             .unwrap();
-        Task {
+        GitTask {
             config,
             repo_dir,
             state: State::default(),
             worker: None,
         }
     }
-    pub fn id(&self) -> String {
+}
+
+impl Task for GitTask {
+    fn id(&self) -> String {
         self.config.name.clone()
     }
 
-    pub fn is_eligible(&self) -> bool {
+    fn is_eligible(&self) -> bool {
         self.worker.is_none() && self.state.next_run < SystemTime::now()
     }
 
-    pub fn is_finished(&self) -> bool {
-        self.worker.as_ref().map(JoinHandle::is_finished).is_some()
+    fn is_running(&self) -> bool {
+        self.worker.as_ref().is_some_and(|h| !h.is_finished())
     }
 
-    pub fn processed_sha(&mut self, new_sha: ObjectId) {
-        self.state.current_sha = new_sha;
+    fn is_finished(&self) -> bool {
+        self.worker.as_ref().is_some_and(|h| h.is_finished())
     }
 
-    pub fn schedule_next(&mut self) {
+    fn schedule_next(&mut self) {
         self.state.next_run = SystemTime::now().add(self.config.interval);
     }
 
-    pub fn start(&mut self, tx: Sender<ActionOutput>) -> Result<(), GitOpsError> {
+    fn start(&mut self, tx: Sender<ActionOutput>) -> Result<(), GitOpsError> {
         let task_id = self.id();
         let config = self.config.clone();
         let current_sha = self.state.current_sha;
@@ -88,12 +103,23 @@ impl Task {
         Ok(())
     }
 
-    pub fn take_result(&mut self) -> Result<ObjectId, GitOpsError> {
-        self.worker
+    fn finalize(&mut self) -> Result<(), GitOpsError> {
+        let new_sha = self
+            .worker
             .take()
             .expect("result only called once")
             .join()
-            .unwrap()
+            .unwrap()?;
+        self.state.current_sha = new_sha;
+        Ok(())
+    }
+
+    fn state(&self) -> State {
+        self.state.clone()
+    }
+
+    fn set_state(&mut self, state: State) {
+        self.state = state;
     }
 }
 
