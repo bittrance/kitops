@@ -8,8 +8,10 @@ kitops is under development and not yet ready to be used.
 
 The plan forward, roughly in falling priority:
 
-- [ ] --poll-once to check all repos that are due, then exit
-- [ ] verify azdo support
+- [x] --poll-once to check all repos that are due, then exit
+- [ ] verify azdo support - Byron/gitoxide#1025
+- [ ] Reasonable timeout duration entry (i.e. not serde default secs/nanos)
+- [ ] Errors in scoped blocks should cancel, not wait for watchdog to reach deadline
 - [ ] allow configuring notification actions
 - [ ] specialized notification action to update github status
 - [ ] new git sha and branch name in action env vars
