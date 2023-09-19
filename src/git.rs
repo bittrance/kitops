@@ -1,6 +1,9 @@
 use std::{
     path::Path,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
     thread::{scope, sleep},
     time::{Duration, Instant},
 };
@@ -8,14 +11,13 @@ use std::{
 use gix::{
     bstr::{BString, ByteSlice},
     config::tree::User,
-    prelude::FindExt,
-    progress::Discard,
+    progress::{AtomicStep, Discard, Id, MessageLevel, Step, StepShared, Unit},
     refs::{
         transaction::{Change, LogChange, RefEdit},
         Target,
     },
     remote::{ref_map::Options, Direction},
-    ObjectId, Repository, Url,
+    Count, NestedProgress, ObjectId, Progress, Repository, Url,
 };
 use serde::{Deserialize, Deserializer};
 
@@ -60,6 +62,80 @@ where
     Url::try_from(s).map_err(serde::de::Error::custom)
 }
 
+#[derive(Default)]
+struct P {
+    max: Option<Step>,
+    step: Mutex<Option<Step>>,
+    unit: Option<Unit>,
+    name: Option<String>,
+}
+
+impl Progress for P {
+    fn init(&mut self, max: Option<Step>, unit: Option<Unit>) {
+        self.max = max;
+        self.unit = unit;
+    }
+
+    fn set_name(&mut self, name: String) {
+        println!("created {}", name);
+        self.name = Some(name);
+    }
+
+    fn name(&self) -> Option<String> {
+        self.name.clone()
+    }
+
+    fn id(&self) -> Id {
+        todo!()
+    }
+
+    fn message(&self, level: MessageLevel, message: String) {
+        println!("{:?} {:?} {}", self.name, level, message);
+    }
+}
+
+impl Count for P {
+    fn set(&self, step: Step) {
+        *self.step.lock().unwrap() = Some(step);
+        println!("{:?} start at {:?}", self.name, self.step);
+    }
+
+    fn step(&self) -> Step {
+        self.step.lock().unwrap().clone().unwrap_or_default()
+    }
+
+    fn inc_by(&self, step: Step) {
+        *self.step.lock().unwrap().get_or_insert(Step::default()) += step;
+        if self.name == Some("read pack".to_owned()) {
+            println!("{:?} incremented to {:?}", self.name, self.step);
+        }
+    }
+
+    fn counter(&self) -> StepShared {
+        Arc::new(AtomicUsize::new(
+            self.step.lock().unwrap().unwrap_or_default(),
+        ))
+    }
+}
+
+impl NestedProgress for P {
+    type SubProgress = P;
+
+    fn add_child(&mut self, name: impl Into<String>) -> Self::SubProgress {
+        P {
+            name: Some(name.into()),
+            ..Default::default()
+        }
+    }
+
+    fn add_child_with_id(&mut self, name: impl Into<String>, id: Id) -> Self::SubProgress {
+        P {
+            name: Some(name.into()),
+            ..Default::default()
+        }
+    }
+}
+
 fn clone_repo(
     config: &GitConfig,
     deadline: Instant,
@@ -74,9 +150,10 @@ fn clone_repo(
             }
             should_interrupt.store(true, Ordering::Relaxed);
         });
+        let p = P::default();
         let (repo, _outcome) = gix::prepare_clone(config.url.clone(), target)
             .unwrap()
-            .fetch_only(Discard, &should_interrupt)
+            .fetch_only(p, &should_interrupt)
             .map_err(GitOpsError::InitRepo)?;
         cancel.store(true, Ordering::Relaxed);
         Ok(repo)
@@ -153,16 +230,16 @@ fn checkout_worktree(
         .unwrap();
     let (mut state, _) = repo.index_from_tree(&tree_id).unwrap().into_parts();
     let odb = repo.objects.clone().into_arc().unwrap();
-    let _outcome = gix::worktree::checkout(
-        &mut state,
-        workdir,
-        move |oid, buf| odb.find_blob(oid, buf),
-        &mut Discard,
-        &mut Discard,
-        &AtomicBool::default(),
-        gix::worktree::checkout::Options::default(),
-    )
-    .unwrap();
+    // let _outcome = gix::worktree::checkout(
+    //     &mut state,
+    //     workdir,
+    //     move |oid, buf| odb.find_blob(oid, buf),
+    //     &mut Discard,
+    //     &mut Discard,
+    //     &AtomicBool::default(),
+    //     gix::worktree::checkout::Options::default(),
+    // )
+    // .unwrap();
     Ok(oid)
 }
 
