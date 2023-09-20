@@ -7,7 +7,7 @@ use crate::{
     actions::Action,
     errors::GitOpsError,
     store::{FileStore, Store},
-    task::{GitOpsConfig, Task},
+    task::{GitOpsConfig, GitTask},
 };
 
 #[derive(Parser)]
@@ -39,6 +39,9 @@ pub struct CliOptions {
     /// Max run time for repo fetch plus action in seconds
     #[clap(long)]
     pub timeout: Option<f32>,
+    /// Run once and exit
+    #[clap(long)]
+    pub once_only: bool,
 }
 
 #[derive(Deserialize)]
@@ -46,7 +49,7 @@ struct ConfigFile {
     tasks: Vec<GitOpsConfig>,
 }
 
-fn tasks_from_file(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
+fn tasks_from_file(opts: &CliOptions) -> Result<Vec<GitTask>, GitOpsError> {
     let config =
         File::open(opts.config_file.clone().unwrap()).map_err(GitOpsError::MissingConfig)?;
     let config_file: ConfigFile =
@@ -54,18 +57,18 @@ fn tasks_from_file(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
     Ok(config_file
         .tasks
         .into_iter()
-        .map(|c| Task::from_config(c, opts))
+        .map(|c| GitTask::from_config(c, opts))
         .collect())
 }
 
-fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
+fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<GitTask>, GitOpsError> {
     let mut config: GitOpsConfig = TryFrom::try_from(opts)?;
     let action: Action = TryFrom::try_from(opts)?;
     config.add_action(action);
-    Ok(vec![Task::from_config(config, opts)])
+    Ok(vec![GitTask::from_config(config, opts)])
 }
 
-pub fn load_tasks(opts: &CliOptions) -> Result<Vec<Task>, GitOpsError> {
+pub fn load_tasks(opts: &CliOptions) -> Result<Vec<GitTask>, GitOpsError> {
     if opts.action.is_some() || opts.url.is_some() {
         if opts.action.is_none() || opts.url.is_none() || opts.config_file.is_some() {
             return Err(GitOpsError::ConfigConflict);
