@@ -7,6 +7,7 @@ pub mod opts;
 pub mod receiver;
 pub mod store;
 pub mod task;
+pub(crate) mod utils;
 
 #[derive(Debug, PartialEq)]
 pub enum Progress {

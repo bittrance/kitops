@@ -1,9 +1,4 @@
-use std::{
-    path::Path,
-    sync::atomic::{AtomicBool, Ordering},
-    thread::{scope, sleep},
-    time::{Duration, Instant},
-};
+use std::{path::Path, sync::atomic::AtomicBool, thread::scope, time::Instant};
 
 use gix::{
     bstr::{BString, ByteSlice},
@@ -14,12 +9,12 @@ use gix::{
         transaction::{Change, LogChange, RefEdit},
         Target,
     },
-    remote::{ref_map::Options, Direction},
+    remote::{fetch::Outcome, ref_map::Options, Direction},
     ObjectId, Repository, Url,
 };
 use serde::{Deserialize, Deserializer};
 
-use crate::{errors::GitOpsError, opts::CliOptions};
+use crate::{errors::GitOpsError, opts::CliOptions, utils::Watchdog};
 
 #[derive(Clone, Deserialize)]
 pub struct GitConfig {
@@ -65,47 +60,41 @@ fn clone_repo(
     deadline: Instant,
     target: &Path,
 ) -> Result<Repository, GitOpsError> {
-    let should_interrupt = AtomicBool::new(false);
-    let cancel = AtomicBool::new(false);
+    let watchdog = Watchdog::new(deadline);
     scope(|s| {
-        s.spawn(|| {
-            while Instant::now() < deadline && !cancel.load(Ordering::Relaxed) {
-                sleep(Duration::from_secs(1));
-            }
-            should_interrupt.store(true, Ordering::Relaxed);
-        });
-        let (repo, _outcome) = gix::prepare_clone(config.url.clone(), target)
+        s.spawn(watchdog.runner());
+        let repo = gix::prepare_clone(config.url.clone(), target)
             .unwrap()
-            .fetch_only(Discard, &should_interrupt)
-            .map_err(GitOpsError::InitRepo)?;
-        cancel.store(true, Ordering::Relaxed);
-        Ok(repo)
+            .fetch_only(Discard, &watchdog)
+            .map(|(r, _)| r)
+            .map_err(GitOpsError::InitRepo);
+        watchdog.cancel();
+        repo
     })
 }
 
+fn perform_fetch(
+    repo: &Repository,
+    config: &GitConfig,
+    cancel: &AtomicBool,
+) -> Result<Outcome, Box<dyn std::error::Error + Send + Sync>> {
+    repo.remote_at(config.url.clone())
+        .unwrap()
+        .with_refspecs([BString::from(config.branch.clone())], Direction::Fetch)
+        .unwrap()
+        .connect(Direction::Fetch)?
+        .prepare_fetch(Discard, Options::default())?
+        .receive(Discard, cancel)
+        .map_err(Into::into)
+}
+
 fn fetch_repo(repo: &Repository, config: &GitConfig, deadline: Instant) -> Result<(), GitOpsError> {
-    let should_interrupt = AtomicBool::new(false);
-    let cancel = AtomicBool::new(false);
+    let watchdog = Watchdog::new(deadline);
     let outcome = scope(|s| {
-        s.spawn(|| {
-            while Instant::now() < deadline && !cancel.load(Ordering::Relaxed) {
-                sleep(Duration::from_secs(1));
-            }
-            should_interrupt.store(true, Ordering::Relaxed);
-        });
-        let outcome = repo
-            .remote_at(config.url.clone())
-            .unwrap()
-            .with_refspecs([BString::from(config.branch.clone())], Direction::Fetch)
-            .unwrap()
-            .connect(Direction::Fetch)
-            .map_err(|e| GitOpsError::FetchError(e.into()))?
-            .prepare_fetch(Discard, Options::default())
-            .map_err(|e| GitOpsError::FetchError(e.into()))?
-            .receive(Discard, &should_interrupt)
-            .map_err(|e| GitOpsError::FetchError(e.into()))?;
-        cancel.store(true, Ordering::Relaxed);
-        Ok(outcome)
+        s.spawn(watchdog.runner());
+        let outcome = perform_fetch(repo, config, &watchdog).map_err(GitOpsError::FetchError);
+        watchdog.cancel();
+        outcome
     })?;
     let needle = BString::from("refs/heads/".to_owned() + &config.branch);
     let target = outcome
