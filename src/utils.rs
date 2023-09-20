@@ -42,3 +42,28 @@ impl Deref for Watchdog {
         &self.cancellation
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::thread::scope;
+    use std::time::Instant;
+
+    #[test]
+    fn reach_deadline() {
+        let deadline = Instant::now() + super::POLL_INTERVAL * 3;
+        let watchdog = super::Watchdog::new(deadline);
+        watchdog.runner()();
+        assert!(Instant::now() > deadline);
+    }
+
+    #[test]
+    fn cancellation() {
+        let deadline = Instant::now() + super::POLL_INTERVAL * 3;
+        let watchdog = super::Watchdog::new(deadline);
+        scope(|s| {
+            s.spawn(watchdog.runner());
+            watchdog.cancel();
+        });
+        assert!(Instant::now() < deadline);
+    }
+}
