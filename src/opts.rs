@@ -1,4 +1,4 @@
-use std::{fs::File, path::PathBuf};
+use std::{fs::File, path::PathBuf, time::Duration};
 
 use clap::Parser;
 use serde::Deserialize;
@@ -7,7 +7,7 @@ use crate::{
     actions::Action,
     errors::GitOpsError,
     store::{FileStore, Store},
-    task::{GitOpsConfig, GitTask},
+    task::{GitTask, GitTaskConfig},
 };
 
 #[derive(Parser)]
@@ -34,11 +34,11 @@ pub struct CliOptions {
     #[clap(long)]
     pub environment: Vec<String>,
     /// Check repo for changes at this interval
-    #[clap(long)]
-    pub interval: Option<f32>,
+    #[arg(long, value_parser = humantime::parse_duration)]
+    pub interval: Option<Duration>,
     /// Max run time for repo fetch plus action in seconds
-    #[clap(long)]
-    pub timeout: Option<f32>,
+    #[arg(long, value_parser = humantime::parse_duration)]
+    pub timeout: Option<Duration>,
     /// Run once and exit
     #[clap(long)]
     pub once_only: bool,
@@ -46,7 +46,7 @@ pub struct CliOptions {
 
 #[derive(Deserialize)]
 struct ConfigFile {
-    tasks: Vec<GitOpsConfig>,
+    tasks: Vec<GitTaskConfig>,
 }
 
 fn tasks_from_file(opts: &CliOptions) -> Result<Vec<GitTask>, GitOpsError> {
@@ -62,7 +62,7 @@ fn tasks_from_file(opts: &CliOptions) -> Result<Vec<GitTask>, GitOpsError> {
 }
 
 fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<GitTask>, GitOpsError> {
-    let mut config: GitOpsConfig = TryFrom::try_from(opts)?;
+    let mut config: GitTaskConfig = TryFrom::try_from(opts)?;
     let action: Action = TryFrom::try_from(opts)?;
     config.add_action(action);
     Ok(vec![GitTask::from_config(config, opts)])
