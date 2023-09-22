@@ -28,10 +28,15 @@ where
 {
     loop {
         let res = progress_one_task(tasks, &mut persist, tx)?;
-        if (res == Progress::Idle) && once_only {
-            return Ok(());
+        if res == Progress::Idle {
+            if once_only {
+                // TODO: We should remove tasks from the list? Current strategy will
+                // run continuously if task execution time > task interval.
+                return Ok(());
+            } else {
+                sleep(poll_interval);
+            }
         }
-        sleep(poll_interval);
     }
 }
 
