@@ -10,6 +10,8 @@ use crate::{
     task::{GitTask, GitTaskConfig},
 };
 
+const DEFAULT_BRANCH: &str = "main";
+
 #[derive(Parser)]
 pub struct CliOptions {
     /// Path where state is stored
@@ -25,7 +27,7 @@ pub struct CliOptions {
     #[clap(long)]
     pub url: Option<String>,
     /// Branch to check out
-    #[clap(long, default_value = "main")]
+    #[clap(long, default_value = DEFAULT_BRANCH)]
     pub branch: String,
     /// Command to execute on change (passed to /bin/sh)
     #[clap(long)]
@@ -33,15 +35,46 @@ pub struct CliOptions {
     /// Environment variable for action
     #[clap(long)]
     pub environment: Vec<String>,
-    /// Check repo for changes at this interval
+    /// Check repo for changes at this interval (e.g. 1h, 30m, 10s)
     #[arg(long, value_parser = humantime::parse_duration)]
     pub interval: Option<Duration>,
-    /// Max run time for repo fetch plus action in seconds
+    /// Max run time for repo fetch plus action (e.g. 1h, 30m, 10s)
     #[arg(long, value_parser = humantime::parse_duration)]
     pub timeout: Option<Duration>,
     /// Run once and exit
     #[clap(long)]
     pub once_only: bool,
+}
+
+impl CliOptions {
+    pub fn complete(&mut self) -> Result<(), GitOpsError> {
+        if self.config_file.is_some() {
+            if self.url.is_some()
+                || self.branch != DEFAULT_BRANCH
+                || self.action.is_some()
+                || !self.environment.is_empty()
+            {
+                return Err(GitOpsError::ConfigMethodConflict);
+            }
+        } else if self.url.is_none() || self.action.is_none() {
+            return Err(GitOpsError::ConfigMethodConflict);
+        }
+        if self.once_only && self.interval.is_some() {
+            return Err(GitOpsError::ConfigExecutionConflict);
+        }
+        if let Some(ref dir) = self.repo_dir {
+            if !dir.exists() {
+                return Err(GitOpsError::MissingRepoDir(dir.clone()));
+            }
+        } else {
+            self.repo_dir = Some(
+                tempfile::tempdir()
+                    .map_err(GitOpsError::CreateRepoDir)?
+                    .into_path(),
+            );
+        }
+        Ok(())
+    }
 }
 
 #[derive(Deserialize)]
@@ -69,21 +102,42 @@ fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<GitTask>, GitOpsError> {
 }
 
 pub fn load_tasks(opts: &CliOptions) -> Result<Vec<GitTask>, GitOpsError> {
-    if opts.action.is_some() || opts.url.is_some() {
-        if opts.action.is_none() || opts.url.is_none() || opts.config_file.is_some() {
-            return Err(GitOpsError::ConfigConflict);
-        }
+    if opts.url.is_some() {
         tasks_from_opts(opts)
     } else {
-        if opts.config_file.is_none() {
-            return Err(GitOpsError::ConfigConflict);
-        }
         tasks_from_file(opts)
     }
 }
 
 pub fn load_store(opts: &CliOptions) -> Result<impl Store, GitOpsError> {
     FileStore::from_file(&opts.state_file)
+}
+
+#[test]
+fn complete_cli_options_no_args() {
+    let mut opts = CliOptions::parse_from(&["kitops"]);
+    let res = opts.complete();
+    assert!(matches!(res, Err(GitOpsError::ConfigMethodConflict)));
+}
+
+#[test]
+fn complete_cli_options_incomplete_args() {
+    let mut opts = CliOptions::parse_from(&["kitops", "--url", "file:///tmp"]);
+    let res = opts.complete();
+    assert!(matches!(res, Err(GitOpsError::ConfigMethodConflict)));
+}
+
+#[test]
+fn complete_cli_options_conflicting_args() {
+    let mut opts = CliOptions::parse_from(&[
+        "kitops",
+        "--config-file",
+        "foo.yaml",
+        "--url",
+        "file:///tmp",
+    ]);
+    let res = opts.complete();
+    assert!(matches!(res, Err(GitOpsError::ConfigMethodConflict)));
 }
 
 #[test]
