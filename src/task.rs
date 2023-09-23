@@ -82,10 +82,14 @@ impl Task for GitTask {
             .map_err(GitOpsError::WorkDir)?
             .into_path();
         let deadline = Instant::now() + config.timeout;
+        let sink = move |event| {
+            tx.send(event)
+                .map_err(|err| GitOpsError::SendError(format!("{}", err)))
+        };
         let worker = spawn(move || {
             let new_sha = ensure_worktree(&config.git, deadline, &repodir, &workdir)?;
             if current_sha != new_sha {
-                tx.send(ActionOutput::Changes(
+                sink(ActionOutput::Changes(
                     config.name.clone(),
                     current_sha,
                     new_sha,
@@ -93,7 +97,7 @@ impl Task for GitTask {
                 .map_err(|err| GitOpsError::SendError(format!("{}", err)))?;
                 for action in config.actions {
                     let name = format!("{}|{}", task_id, action.id());
-                    run_action(&name, &action, &workdir, deadline, &tx)?;
+                    run_action(&name, &action, &workdir, deadline, &sink)?;
                 }
             }
             std::fs::remove_dir_all(workdir).map_err(GitOpsError::WorkDir)?;

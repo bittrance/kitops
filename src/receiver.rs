@@ -2,12 +2,13 @@ use std::{process::ExitStatus, sync::mpsc::Receiver};
 
 use gix::{hash::Kind, ObjectId};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SourceType {
     StdOut,
     StdErr,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum ActionOutput {
     Changes(String, ObjectId, ObjectId),
     Output(String, SourceType, Vec<u8>),

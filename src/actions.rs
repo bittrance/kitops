@@ -3,7 +3,6 @@ use std::{
     io::Read,
     path::Path,
     process::{Command, Stdio},
-    sync::mpsc::Sender,
     thread::{sleep, spawn, JoinHandle},
     time::{Duration, Instant},
 };
@@ -71,52 +70,102 @@ fn build_command(action: &Action, cwd: &Path) -> Command {
     command
 }
 
-fn emit_data<R>(
+fn emit_data<F, R>(
     name: String,
     mut source: R,
     source_type: SourceType,
-    tx: Sender<ActionOutput>,
+    sink: &F,
 ) -> JoinHandle<Result<(), GitOpsError>>
 where
     R: Read + Send + 'static,
+    F: Fn(ActionOutput) -> Result<(), GitOpsError> + Clone + Send + 'static,
 {
+    let sink = sink.clone();
     spawn(move || {
         let mut buf: [u8; 4096] = [0; 4096];
-        while source.read(&mut buf).map_err(GitOpsError::ActionError)? > 0 {
-            tx.send(ActionOutput::Output(name.clone(), source_type, buf.into()))
-                .map_err(|err| GitOpsError::SendError(format!("{}", err)))?;
+        loop {
+            let len = source.read(&mut buf).map_err(GitOpsError::ActionError)?;
+            if len == 0 {
+                break;
+            }
+            sink(ActionOutput::Output(
+                name.clone(),
+                source_type,
+                buf[..len].into(),
+            ))?;
         }
         Ok::<(), GitOpsError>(())
     })
 }
 
-pub fn run_action(
+pub fn run_action<F>(
     name: &str,
     action: &Action,
     cwd: &Path,
     deadline: Instant,
-    tx: &Sender<ActionOutput>,
-) -> Result<(), GitOpsError> {
+    sink: &F,
+) -> Result<(), GitOpsError>
+where
+    F: Fn(ActionOutput) -> Result<(), GitOpsError> + Clone + Send + 'static,
+{
     let mut command = build_command(action, cwd);
     let mut child = command.spawn().map_err(GitOpsError::ActionError)?;
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
     // TODO Proper cleanup; break read threads, et c
-    emit_data(name.to_string(), stdout, SourceType::StdOut, tx.clone());
-    emit_data(name.to_string(), stderr, SourceType::StdErr, tx.clone());
+    emit_data(name.to_string(), stdout, SourceType::StdOut, sink);
+    emit_data(name.to_string(), stderr, SourceType::StdErr, sink);
     loop {
         if let Some(exit) = child.try_wait().map_err(GitOpsError::ActionError)? {
-            tx.send(ActionOutput::Exit(name.to_string(), exit))
-                .map_err(|err| GitOpsError::SendError(format!("{}", err)))?;
+            sink(ActionOutput::Exit(name.to_string(), exit))?;
             break;
         }
         if Instant::now() > deadline {
             child.kill().map_err(GitOpsError::ActionError)?;
-            tx.send(ActionOutput::Timeout(name.to_string()))
-                .map_err(|err| GitOpsError::SendError(format!("{}", err)))?;
+            sink(ActionOutput::Timeout(name.to_string()))?;
             break;
         }
         sleep(Duration::from_secs(1));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        os::unix::process::ExitStatusExt,
+        process::ExitStatus,
+        sync::{Arc, Mutex},
+    };
+
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    #[cfg(unix)]
+    fn test_run_action() {
+        let action = Action {
+            name: "test".to_string(),
+            entrypoint: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), "echo test".to_string()],
+            environment: HashMap::new(),
+            inherit_environment: false,
+        };
+        let workdir = tempdir().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events2 = events.clone();
+        let sink = move |event| {
+            events2.lock().unwrap().push(event);
+            Ok(())
+        };
+        run_action("test", &action, workdir.path(), deadline, &sink).unwrap();
+        assert_eq!(
+            vec![
+                ActionOutput::Output("test".to_owned(), SourceType::StdOut, b"test\n".to_vec()),
+                ActionOutput::Exit("test".to_owned(), ExitStatus::from_raw(0)),
+            ],
+            events.lock().unwrap()[..]
+        );
+    }
 }
