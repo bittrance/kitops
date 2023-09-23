@@ -13,9 +13,13 @@ pub enum GitOpsError {
     #[error("Malformed configuration: {0}")]
     MalformedConfig(serde_yaml::Error),
     #[error("Provide --url and --action or --config-file")]
-    ConfigConflict,
+    ConfigMethodConflict,
+    #[error("Provide --interval or --once-only")]
+    ConfigExecutionConflict,
     #[error("Cannot find directory to store repositories: {0}")]
     MissingRepoDir(PathBuf),
+    #[error("Failed to create directory to store repositories: {0}")]
+    CreateRepoDir(std::io::Error),
     #[error("Failed to open/create state file: {0}")]
     StateFile(std::io::Error),
     #[error("Falied to read state: {0}")]
