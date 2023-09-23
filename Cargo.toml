@@ -10,6 +10,7 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.1.4", features = ["derive"] }
 gix = { version = "0.51.0", features = ["default", "blocking-network-client", "blocking-http-transport-reqwest-native-tls", "serde"] }
+humantime = "2.1.0"
 serde = { version = "1.0.152", features = ["derive"] }
 serde_yaml = "0.9.17"
 tempfile = "3.3.0"
