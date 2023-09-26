@@ -17,6 +17,10 @@ use crate::{
     receiver::ActionOutput,
 };
 
+use self::github::{update_commit_status, GitHubStatus};
+
+pub mod github;
+
 pub trait Task {
     fn id(&self) -> String;
     fn is_eligible(&self) -> bool;
@@ -100,6 +104,14 @@ impl Task for GitTask {
                     run_action(&name, &action, &workdir, deadline, &sink)?;
                 }
             }
+            if let Some(cfg) = config.notify {
+                update_commit_status(
+                    &cfg,
+                    &new_sha.to_string(),
+                    GitHubStatus::Success,
+                    "Did it",
+                )?;
+            }
             std::fs::remove_dir_all(workdir).map_err(GitOpsError::WorkDir)?;
             Ok(new_sha)
         });
@@ -154,6 +166,7 @@ where
 pub struct GitTaskConfig {
     name: String,
     git: GitConfig,
+    notify: Option<github::GitHubNotifyConfig>,
     actions: Vec<Action>,
     #[serde(
         default = "GitTaskConfig::default_interval",
@@ -181,6 +194,7 @@ impl TryFrom<&CliOptions> for GitTaskConfig {
         Ok(Self {
             name: url.path.to_string(),
             git: TryFrom::try_from(opts)?,
+            notify: TryFrom::try_from(opts)?,
             actions: Vec::new(),
             interval: opts.interval.unwrap_or(Self::default_interval()),
             timeout: opts.timeout.unwrap_or(Self::default_timeout()),

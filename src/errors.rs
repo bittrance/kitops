@@ -16,6 +16,8 @@ pub enum GitOpsError {
     ConfigMethodConflict,
     #[error("Provide --interval or --once-only")]
     ConfigExecutionConflict,
+    #[error("Notify section needs github_repo_slug and github_context")]
+    InvalidNotifyConfig,
     #[error("Cannot find directory to store repositories: {0}")]
     MissingRepoDir(PathBuf),
     #[error("Failed to create directory to store repositories: {0}")]
@@ -40,6 +42,16 @@ pub enum GitOpsError {
     SendError(String),
     #[error("Failed to launch action: {0}")]
     ActionError(std::io::Error),
+    #[error("Missing private key file: {0}")]
+    GitHubMissingPrivateKeyFile(std::io::Error),
+    #[error("Malformed private RS256 key: {0}")]
+    GitHubBadPrivateKey(jwt_simple::Error),
+    #[error("GitHub API {0} returned status {1}: {2}")]
+    GitHubApiError(String, reqwest::StatusCode, String),
+    #[error("Failed to connect to GitHub API: {0}")]
+    GitHubNetworkError(reqwest::Error),
+    #[error("GitHub App is installed but does not have write permissions for commit statuses")]
+    GitHubPermissionsError,
 }
 
 impl GitOpsError {

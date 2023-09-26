@@ -24,3 +24,4 @@ The plan forward, roughly in falling priority:
 - [ ] useful logging (log level, json)
 - [ ] support Amazon S3 as state store
 - [ ] support Azure Blob storage as state store
+- [ ] GitHub app for checking out private repo

@@ -35,6 +35,18 @@ pub struct CliOptions {
     /// Environment variable for action
     #[clap(long)]
     pub environment: Vec<String>,
+    /// GitHub App ID
+    #[clap(long)]
+    pub github_app_id: Option<String>,
+    /// GitHub App private key file
+    #[clap(long)]
+    pub github_private_key_file: Option<PathBuf>,
+    /// Update GitHub commit status on this repo
+    #[clap(long)]
+    pub github_repo_slug: Option<String>,
+    /// Use this context when updating GitHub commit status
+    #[clap(long)]
+    pub github_context: Option<String>,
     /// Check repo for changes at this interval (e.g. 1h, 30m, 10s)
     #[arg(long, value_parser = humantime::parse_duration)]
     pub interval: Option<Duration>,
