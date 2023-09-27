@@ -22,7 +22,6 @@ use self::github::{update_commit_status, GitHubStatus};
 pub mod github;
 
 pub trait Task {
-    fn id(&self) -> String;
     fn is_eligible(&self) -> bool;
     fn is_running(&self) -> bool;
     fn is_finished(&self) -> bool;
@@ -54,13 +53,44 @@ impl GitTask {
             worker: None,
         }
     }
-}
 
-impl Task for GitTask {
-    fn id(&self) -> String {
+    pub fn id(&self) -> String {
         self.config.name.clone()
     }
 
+    fn work<F>(&self, workdir: PathBuf, current_sha: ObjectId, sink: F) -> impl FnOnce() -> Result<ObjectId, GitOpsError>
+    where
+        F: Fn(ActionOutput) -> Result<(), GitOpsError> + Clone + Send + 'static,
+    {
+        let config = self.config.clone();
+        let task_id = config.name.clone();
+        let repodir = self.repo_dir.clone();
+        let deadline = Instant::now() + config.timeout;
+
+        move || {
+            let new_sha = ensure_worktree(&config.git, deadline, &repodir, &workdir)?;
+            if current_sha != new_sha {
+                sink(ActionOutput::Changes(
+                    config.name.clone(),
+                    current_sha,
+                    new_sha,
+                ))
+                .map_err(|err| GitOpsError::SendError(format!("{}", err)))?;
+                for action in config.actions {
+                    let name = format!("{}|{}", task_id, action.id());
+                    run_action(&name, &action, &workdir, deadline, &sink)?;
+                }
+            }
+            if let Some(cfg) = config.notify {
+                update_commit_status(&cfg, &new_sha.to_string(), GitHubStatus::Success, "Did it")?;
+            }
+            std::fs::remove_dir_all(&workdir).map_err(GitOpsError::WorkDir)?;
+            Ok(new_sha)
+        }
+    }
+}
+
+impl Task for GitTask {
     fn is_eligible(&self) -> bool {
         self.worker.is_none() && self.state.next_run < SystemTime::now()
     }
@@ -78,44 +108,15 @@ impl Task for GitTask {
     }
 
     fn start(&mut self, tx: Sender<ActionOutput>) -> Result<(), GitOpsError> {
-        let task_id = self.id();
-        let config = self.config.clone();
         let current_sha = self.state.current_sha;
-        let repodir = self.repo_dir.clone();
         let workdir = tempfile::tempdir()
             .map_err(GitOpsError::WorkDir)?
             .into_path();
-        let deadline = Instant::now() + config.timeout;
         let sink = move |event| {
             tx.send(event)
                 .map_err(|err| GitOpsError::SendError(format!("{}", err)))
         };
-        let worker = spawn(move || {
-            let new_sha = ensure_worktree(&config.git, deadline, &repodir, &workdir)?;
-            if current_sha != new_sha {
-                sink(ActionOutput::Changes(
-                    config.name.clone(),
-                    current_sha,
-                    new_sha,
-                ))
-                .map_err(|err| GitOpsError::SendError(format!("{}", err)))?;
-                for action in config.actions {
-                    let name = format!("{}|{}", task_id, action.id());
-                    run_action(&name, &action, &workdir, deadline, &sink)?;
-                }
-            }
-            if let Some(cfg) = config.notify {
-                update_commit_status(
-                    &cfg,
-                    &new_sha.to_string(),
-                    GitHubStatus::Success,
-                    "Did it",
-                )?;
-            }
-            std::fs::remove_dir_all(workdir).map_err(GitOpsError::WorkDir)?;
-            Ok(new_sha)
-        });
-        self.worker = Some(worker);
+        self.worker = Some(spawn(self.work(workdir, current_sha, sink)));
         Ok(())
     }
 

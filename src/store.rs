@@ -12,7 +12,7 @@ use crate::{
 pub trait Store {
     fn get(&self, id: &str) -> Option<&State>;
     fn retain(&mut self, task_ids: HashSet<String>);
-    fn persist<T>(&mut self, task: &T) -> Result<(), GitOpsError>
+    fn persist<T>(&mut self, id: String, task: &T) -> Result<(), GitOpsError>
     where
         T: Task;
 }
@@ -47,11 +47,11 @@ impl Store for FileStore {
         self.state.retain(|id, _| task_ids.contains(id));
     }
 
-    fn persist<T>(&mut self, task: &T) -> Result<(), GitOpsError>
+    fn persist<T>(&mut self, id: String, task: &T) -> Result<(), GitOpsError>
     where
         T: Task,
     {
-        self.state.insert(task.id(), task.state());
+        self.state.insert(id, task.state());
         let file = File::create(&self.path).map_err(GitOpsError::SavingState)?;
         serde_yaml::to_writer(file, &self.state).map_err(GitOpsError::SerdeState)
     }

@@ -29,7 +29,7 @@ fn main() -> Result<(), GitOpsError> {
     }
     run_tasks(
         &mut tasks[..],
-        |t: &GitTask| store.persist(t),
+        |t: &GitTask| store.persist(t.id(), t),
         &tx,
         opts.once_only,
         Duration::from_secs(1),

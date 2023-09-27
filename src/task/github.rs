@@ -75,18 +75,7 @@ fn generate_jwt(config: &GitHubNotifyConfig) -> Result<String, GitOpsError> {
         .map_err(GitOpsError::GitHubBadPrivateKey)
 }
 
-pub fn update_commit_status(
-    config: &GitHubNotifyConfig,
-    sha: &str,
-    status: GitHubStatus,
-    message: &str,
-) -> Result<(), GitOpsError> {
-    let client = ClientBuilder::new()
-        .connect_timeout(Duration::from_secs(5))
-        .build()
-        .unwrap();
-
-    let jwt_token = generate_jwt(config)?;
+fn get_installation_id(config: &GitHubNotifyConfig, client: &reqwest::blocking::Client, jwt_token: &String) -> Result<u64, GitOpsError> {
     // TODO Is this different if we are installed organization-wise?
     let url = format!(
         "https://api.github.com/repos/{}/installation",
@@ -113,7 +102,10 @@ pub fn update_commit_status(
     if permissions.get("statuses") != Some(&Value::String("write".to_owned())) {
         return Err(GitOpsError::GitHubPermissionsError);
     }
+    Ok(installation_id)
+}
 
+fn get_access_token(installation_id: u64, client: &reqwest::blocking::Client, jwt_token: &String) -> Result<String, GitOpsError> {
     let url = format!(
         "https://api.github.com/app/installations/{}/access_tokens",
         installation_id
@@ -134,7 +126,24 @@ pub fn update_commit_status(
         ));
     }
     let access: Value = res.json().unwrap();
-    let access_token = access["token"].as_str().unwrap();
+    let access_token = access["token"].as_str().unwrap().to_owned();
+    Ok(access_token)
+}
+
+pub fn update_commit_status(
+    config: &GitHubNotifyConfig,
+    sha: &str,
+    status: GitHubStatus,
+    message: &str,
+) -> Result<(), GitOpsError> {
+    let client = ClientBuilder::new()
+        .connect_timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+
+    let jwt_token = generate_jwt(config)?;
+    let installation_id = get_installation_id(config, &client, &jwt_token)?;
+    let access_token = get_access_token(installation_id, &client, &jwt_token)?;
 
     let url = format!(
         "https://api.github.com/repos/{}/statuses/{}",

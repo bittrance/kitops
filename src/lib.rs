@@ -79,18 +79,15 @@ mod lib {
 
     #[derive(Default)]
     struct TestTask {
-        pub id: String,
         pub status: RefCell<Option<bool>>,
         pub eligible: RefCell<bool>,
     }
 
     impl TestTask {
-        pub fn new(id: String) -> Self {
-            Self {
-                id,
-                ..Default::default()
-            }
+        pub fn new() -> Self {
+            Default::default()
         }
+
         pub fn make_eligible(&self) {
             *self.eligible.borrow_mut() = true;
         }
@@ -109,10 +106,6 @@ mod lib {
     }
 
     impl Task for TestTask {
-        fn id(&self) -> String {
-            self.id.clone()
-        }
-
         fn is_eligible(&self) -> bool {
             self.status.borrow().is_none() && *self.eligible.borrow()
         }
@@ -152,7 +145,7 @@ mod lib {
 
     #[test]
     fn dont_start_ineligible_task() {
-        let mut tasks = vec![TestTask::new("id-1".to_owned())];
+        let mut tasks = vec![TestTask::new()];
         let (tx, _) = std::sync::mpsc::channel();
         let mut persist = |_t: &TestTask| Ok(());
         let progress = super::progress_one_task(&mut tasks[..], &mut persist, &tx).unwrap();
@@ -162,7 +155,7 @@ mod lib {
 
     #[test]
     fn run_eligible_task() {
-        let mut tasks = vec![TestTask::new("id-1".to_owned())];
+        let mut tasks = vec![TestTask::new()];
         let (tx, _) = std::sync::mpsc::channel();
         let mut persist = |_t: &TestTask| Ok(());
         tasks[0].make_eligible();
