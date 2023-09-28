@@ -6,7 +6,8 @@ use kitops::opts::{load_store, load_tasks, CliOptions};
 use kitops::receiver::logging_receiver;
 use kitops::run_tasks;
 use kitops::store::Store;
-use kitops::task::{GitTask, Task};
+use kitops::task::gixworkload::GitWorkload;
+use kitops::task::scheduled::ScheduledTask;
 use std::time::Duration;
 use std::{collections::HashSet, sync::mpsc::channel, thread::spawn};
 
@@ -20,7 +21,7 @@ fn main() -> Result<(), GitOpsError> {
     });
     let mut tasks = load_tasks(&opts)?;
     let mut store = load_store(&opts)?;
-    let task_ids = tasks.iter().map(GitTask::id).collect::<HashSet<_>>();
+    let task_ids = tasks.iter().map(ScheduledTask::id).collect::<HashSet<_>>();
     store.retain(task_ids);
     for task in &mut tasks {
         if let Some(s) = store.get(&task.id()) {
@@ -29,7 +30,7 @@ fn main() -> Result<(), GitOpsError> {
     }
     run_tasks(
         &mut tasks[..],
-        |t: &GitTask| store.persist(t.id(), t),
+        |t: &ScheduledTask<GitWorkload>| store.persist(t.id(), t),
         &tx,
         opts.once_only,
         Duration::from_secs(1),

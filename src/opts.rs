@@ -7,7 +7,7 @@ use crate::{
     actions::Action,
     errors::GitOpsError,
     store::{FileStore, Store},
-    task::{GitTask, GitTaskConfig},
+    task::{gixworkload::GitWorkload, scheduled::ScheduledTask, GitTaskConfig},
 };
 
 const DEFAULT_BRANCH: &str = "main";
@@ -94,7 +94,7 @@ struct ConfigFile {
     tasks: Vec<GitTaskConfig>,
 }
 
-fn tasks_from_file(opts: &CliOptions) -> Result<Vec<GitTask>, GitOpsError> {
+fn tasks_from_file(opts: &CliOptions) -> Result<Vec<ScheduledTask<GitWorkload>>, GitOpsError> {
     let config =
         File::open(opts.config_file.clone().unwrap()).map_err(GitOpsError::MissingConfig)?;
     let config_file: ConfigFile =
@@ -102,18 +102,20 @@ fn tasks_from_file(opts: &CliOptions) -> Result<Vec<GitTask>, GitOpsError> {
     Ok(config_file
         .tasks
         .into_iter()
-        .map(|c| GitTask::from_config(c, opts))
+        .map(|c| ScheduledTask::new(GitWorkload::from_config(c, opts)))
         .collect())
 }
 
-fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<GitTask>, GitOpsError> {
+fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<ScheduledTask<GitWorkload>>, GitOpsError> {
     let mut config: GitTaskConfig = TryFrom::try_from(opts)?;
     let action: Action = TryFrom::try_from(opts)?;
     config.add_action(action);
-    Ok(vec![GitTask::from_config(config, opts)])
+    let work = GitWorkload::from_config(config, opts);
+    let task = ScheduledTask::new(work);
+    Ok(vec![task])
 }
 
-pub fn load_tasks(opts: &CliOptions) -> Result<Vec<GitTask>, GitOpsError> {
+pub fn load_tasks(opts: &CliOptions) -> Result<Vec<ScheduledTask<GitWorkload>>, GitOpsError> {
     if opts.url.is_some() {
         tasks_from_opts(opts)
     } else {

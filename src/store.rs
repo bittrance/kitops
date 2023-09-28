@@ -6,15 +6,17 @@ use std::{
 
 use crate::{
     errors::GitOpsError,
-    task::{State, Task},
+    task::{scheduled::ScheduledTask, State, Workload},
 };
 
 pub trait Store {
     fn get(&self, id: &str) -> Option<&State>;
     fn retain(&mut self, task_ids: HashSet<String>);
-    fn persist<T>(&mut self, id: String, task: &T) -> Result<(), GitOpsError>
-    where
-        T: Task;
+    fn persist<W: Workload + Clone + Send + 'static>(
+        &mut self,
+        id: String,
+        task: &ScheduledTask<W>,
+    ) -> Result<(), GitOpsError>;
 }
 
 #[derive(Debug, Default)]
@@ -47,10 +49,11 @@ impl Store for FileStore {
         self.state.retain(|id, _| task_ids.contains(id));
     }
 
-    fn persist<T>(&mut self, id: String, task: &T) -> Result<(), GitOpsError>
-    where
-        T: Task,
-    {
+    fn persist<W: Workload + Clone + Send + 'static>(
+        &mut self,
+        id: String,
+        task: &ScheduledTask<W>,
+    ) -> Result<(), GitOpsError> {
         self.state.insert(id, task.state());
         let file = File::create(&self.path).map_err(GitOpsError::SavingState)?;
         serde_yaml::to_writer(file, &self.state).map_err(GitOpsError::SerdeState)

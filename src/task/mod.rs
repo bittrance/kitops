@@ -1,143 +1,30 @@
 use std::{
-    ops::Add,
     path::PathBuf,
-    sync::mpsc::Sender,
-    thread::{spawn, JoinHandle},
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, SystemTime},
 };
 
 use gix::{hash::Kind, ObjectId, Url};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    actions::{run_action, Action},
-    errors::GitOpsError,
-    git::{ensure_worktree, GitConfig},
-    opts::CliOptions,
-    receiver::ActionOutput,
+    actions::Action, errors::GitOpsError, git::GitConfig, opts::CliOptions, receiver::ActionOutput,
 };
 
-use self::github::{update_commit_status, GitHubStatus};
-
 pub mod github;
+pub mod gixworkload;
+pub mod scheduled;
 
-pub trait Task {
-    fn is_eligible(&self) -> bool;
-    fn is_running(&self) -> bool;
-    fn is_finished(&self) -> bool;
-    fn schedule_next(&mut self);
-    fn start(&mut self, tx: Sender<ActionOutput>) -> Result<(), GitOpsError>;
-    fn finalize(&mut self) -> Result<(), GitOpsError>;
-    fn state(&self) -> State;
-    fn set_state(&mut self, state: State);
-}
-
-pub struct GitTask {
-    config: GitTaskConfig,
-    repo_dir: PathBuf,
-    pub state: State,
-    worker: Option<JoinHandle<Result<ObjectId, GitOpsError>>>,
-}
-
-impl GitTask {
-    pub fn from_config(config: GitTaskConfig, opts: &CliOptions) -> Self {
-        let repo_dir = opts
-            .repo_dir
-            .as_ref()
-            .map(|dir| dir.join(config.git.safe_url()))
-            .unwrap();
-        GitTask {
-            config,
-            repo_dir,
-            state: State::default(),
-            worker: None,
-        }
-    }
-
-    pub fn id(&self) -> String {
-        self.config.name.clone()
-    }
-
-    fn work<F>(&self, workdir: PathBuf, current_sha: ObjectId, sink: F) -> impl FnOnce() -> Result<ObjectId, GitOpsError>
+pub trait Workload {
+    fn id(&self) -> String;
+    fn interval(&self) -> Duration;
+    fn work<F>(
+        &self,
+        workdir: PathBuf,
+        current_sha: ObjectId,
+        sink: F,
+    ) -> Result<ObjectId, GitOpsError>
     where
-        F: Fn(ActionOutput) -> Result<(), GitOpsError> + Clone + Send + 'static,
-    {
-        let config = self.config.clone();
-        let task_id = config.name.clone();
-        let repodir = self.repo_dir.clone();
-        let deadline = Instant::now() + config.timeout;
-
-        move || {
-            let new_sha = ensure_worktree(&config.git, deadline, &repodir, &workdir)?;
-            if current_sha != new_sha {
-                sink(ActionOutput::Changes(
-                    config.name.clone(),
-                    current_sha,
-                    new_sha,
-                ))
-                .map_err(|err| GitOpsError::SendError(format!("{}", err)))?;
-                for action in config.actions {
-                    let name = format!("{}|{}", task_id, action.id());
-                    run_action(&name, &action, &workdir, deadline, &sink)?;
-                }
-            }
-            if let Some(cfg) = config.notify {
-                update_commit_status(&cfg, &new_sha.to_string(), GitHubStatus::Success, "Did it")?;
-            }
-            std::fs::remove_dir_all(&workdir).map_err(GitOpsError::WorkDir)?;
-            Ok(new_sha)
-        }
-    }
-}
-
-impl Task for GitTask {
-    fn is_eligible(&self) -> bool {
-        self.worker.is_none() && self.state.next_run < SystemTime::now()
-    }
-
-    fn is_running(&self) -> bool {
-        self.worker.as_ref().is_some_and(|h| !h.is_finished())
-    }
-
-    fn is_finished(&self) -> bool {
-        self.worker.as_ref().is_some_and(|h| h.is_finished())
-    }
-
-    fn schedule_next(&mut self) {
-        self.state.next_run = SystemTime::now().add(self.config.interval);
-    }
-
-    fn start(&mut self, tx: Sender<ActionOutput>) -> Result<(), GitOpsError> {
-        let current_sha = self.state.current_sha;
-        let workdir = tempfile::tempdir()
-            .map_err(GitOpsError::WorkDir)?
-            .into_path();
-        let sink = move |event| {
-            tx.send(event)
-                .map_err(|err| GitOpsError::SendError(format!("{}", err)))
-        };
-        self.worker = Some(spawn(self.work(workdir, current_sha, sink)));
-        Ok(())
-    }
-
-    fn finalize(&mut self) -> Result<(), GitOpsError> {
-        let new_sha = self
-            .worker
-            .take()
-            .expect("result only called once")
-            .join()
-            .unwrap()?;
-        self.state.current_sha = new_sha;
-        Ok(())
-    }
-
-    fn state(&self) -> State {
-        self.state.clone()
-    }
-
-    fn set_state(&mut self, state: State) {
-        self.state = state;
-    }
+        F: Fn(ActionOutput) -> Result<(), GitOpsError> + Clone + Send + 'static;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

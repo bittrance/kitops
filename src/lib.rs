@@ -1,5 +1,7 @@
 use std::{sync::mpsc::Sender, thread::sleep, time::Duration};
 
+use task::{scheduled::ScheduledTask, Workload};
+
 pub mod actions;
 pub mod errors;
 pub mod git;
@@ -7,6 +9,8 @@ pub mod opts;
 pub mod receiver;
 pub mod store;
 pub mod task;
+#[cfg(test)]
+pub(crate) mod testutils;
 pub(crate) mod utils;
 
 #[derive(Debug, PartialEq)]
@@ -15,16 +19,16 @@ pub enum Progress {
     Idle,
 }
 
-pub fn run_tasks<F, T>(
-    tasks: &mut [T],
+pub fn run_tasks<F, W>(
+    tasks: &mut [ScheduledTask<W>],
     mut persist: F,
     tx: &Sender<receiver::ActionOutput>,
     once_only: bool,
     poll_interval: Duration,
 ) -> Result<(), errors::GitOpsError>
 where
-    F: FnMut(&T) -> Result<(), errors::GitOpsError>,
-    T: task::Task,
+    F: FnMut(&ScheduledTask<W>) -> Result<(), errors::GitOpsError>,
+    W: Workload + Clone + Send + 'static,
 {
     loop {
         let res = progress_one_task(tasks, &mut persist, tx)?;
@@ -40,14 +44,14 @@ where
     }
 }
 
-fn progress_one_task<F, T>(
-    tasks: &mut [T],
+fn progress_one_task<F, W>(
+    tasks: &mut [ScheduledTask<W>],
     persist: &mut F,
     tx: &Sender<receiver::ActionOutput>,
 ) -> Result<Progress, errors::GitOpsError>
 where
-    F: FnMut(&T) -> Result<(), errors::GitOpsError>,
-    T: task::Task,
+    F: FnMut(&ScheduledTask<W>) -> Result<(), errors::GitOpsError>,
+    W: Workload + Clone + Send + 'static,
 {
     if let Some(task) = tasks.iter_mut().find(|t| t.is_eligible()) {
         let task_tx = tx.clone();
@@ -70,101 +74,39 @@ where
 
 #[cfg(test)]
 mod lib {
-    use std::cell::RefCell;
-    use std::sync::mpsc::Sender;
+    use std::time::{Duration, SystemTime};
 
-    use crate::errors::GitOpsError;
-    use crate::receiver::ActionOutput;
-    use crate::task::{State, Task};
+    use crate::{
+        task::{scheduled::ScheduledTask, State},
+        testutils::TestWorkload,
+    };
 
-    #[derive(Default)]
-    struct TestTask {
-        pub status: RefCell<Option<bool>>,
-        pub eligible: RefCell<bool>,
-    }
-
-    impl TestTask {
-        pub fn new() -> Self {
-            Default::default()
-        }
-
-        pub fn make_eligible(&self) {
-            *self.eligible.borrow_mut() = true;
-        }
-
-        pub fn run(&self) {
-            *self.eligible.borrow_mut() = false;
-            *self.status.borrow_mut() = Some(true);
-        }
-
-        pub fn complete(&self) {
-            let mut v = self.status.borrow_mut();
-            if v.is_some() {
-                *v = Some(false);
-            }
-        }
-    }
-
-    impl Task for TestTask {
-        fn is_eligible(&self) -> bool {
-            self.status.borrow().is_none() && *self.eligible.borrow()
-        }
-
-        fn is_running(&self) -> bool {
-            self.status.borrow().is_some_and(|s| s)
-        }
-
-        fn is_finished(&self) -> bool {
-            self.status.borrow().is_some_and(|s| !s)
-        }
-
-        fn schedule_next(&mut self) {}
-
-        fn start(&mut self, _: Sender<ActionOutput>) -> Result<(), GitOpsError> {
-            assert!(*self.eligible.borrow());
-            assert!(self.status.borrow().is_none());
-            self.run();
-            Ok(())
-        }
-
-        fn finalize(&mut self) -> Result<(), GitOpsError> {
-            assert!(!*self.eligible.borrow());
-            assert!(self.status.borrow().is_some());
-            *self.status.borrow_mut() = None;
-            Ok(())
-        }
-
-        fn state(&self) -> State {
-            todo!("Not needed")
-        }
-
-        fn set_state(&mut self, _: State) {
-            todo!("Not needed")
-        }
+    #[test]
+    fn run_eligible_task() {
+        let mut tasks = vec![ScheduledTask::new(TestWorkload::default())];
+        let (tx, _) = std::sync::mpsc::channel();
+        let mut persist = |_t: &ScheduledTask<TestWorkload>| Ok(());
+        let progress = super::progress_one_task(&mut tasks[..], &mut persist, &tx).unwrap();
+        assert!(progress == super::Progress::Running);
+        assert!(tasks[0].is_running());
+        tasks[0].await_finished();
+        let progress = super::progress_one_task(&mut tasks[..], &mut persist, &tx).unwrap();
+        assert!(progress == super::Progress::Running);
+        assert!(!tasks[0].is_finished());
+        let progress = super::progress_one_task(&mut tasks[..], &mut persist, &tx).unwrap();
+        assert!(progress == super::Progress::Idle);
     }
 
     #[test]
     fn dont_start_ineligible_task() {
-        let mut tasks = vec![TestTask::new()];
+        let mut tasks = vec![ScheduledTask::new(TestWorkload::default())];
+        tasks[0].set_state(State {
+            next_run: SystemTime::now() + Duration::from_secs(1),
+            current_sha: Default::default(),
+        });
         let (tx, _) = std::sync::mpsc::channel();
-        let mut persist = |_t: &TestTask| Ok(());
+        let mut persist = |_t: &ScheduledTask<TestWorkload>| Ok(());
         let progress = super::progress_one_task(&mut tasks[..], &mut persist, &tx).unwrap();
         assert!(progress == super::Progress::Idle);
-        assert!(!tasks[0].is_running());
-    }
-
-    #[test]
-    fn run_eligible_task() {
-        let mut tasks = vec![TestTask::new()];
-        let (tx, _) = std::sync::mpsc::channel();
-        let mut persist = |_t: &TestTask| Ok(());
-        tasks[0].make_eligible();
-        let progress = super::progress_one_task(&mut tasks[..], &mut persist, &tx).unwrap();
-        assert!(progress == super::Progress::Running);
-        assert!(tasks[0].is_running());
-        tasks[0].complete();
-        let progress = super::progress_one_task(&mut tasks[..], &mut persist, &tx).unwrap();
-        assert!(progress == super::Progress::Running);
-        assert!(!tasks[0].is_eligible());
     }
 }

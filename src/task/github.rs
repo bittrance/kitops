@@ -75,7 +75,11 @@ fn generate_jwt(config: &GitHubNotifyConfig) -> Result<String, GitOpsError> {
         .map_err(GitOpsError::GitHubBadPrivateKey)
 }
 
-fn get_installation_id(config: &GitHubNotifyConfig, client: &reqwest::blocking::Client, jwt_token: &String) -> Result<u64, GitOpsError> {
+fn get_installation_id(
+    config: &GitHubNotifyConfig,
+    client: &reqwest::blocking::Client,
+    jwt_token: &String,
+) -> Result<u64, GitOpsError> {
     // TODO Is this different if we are installed organization-wise?
     let url = format!(
         "https://api.github.com/repos/{}/installation",
@@ -105,7 +109,11 @@ fn get_installation_id(config: &GitHubNotifyConfig, client: &reqwest::blocking::
     Ok(installation_id)
 }
 
-fn get_access_token(installation_id: u64, client: &reqwest::blocking::Client, jwt_token: &String) -> Result<String, GitOpsError> {
+fn get_access_token(
+    installation_id: u64,
+    client: &reqwest::blocking::Client,
+    jwt_token: &String,
+) -> Result<String, GitOpsError> {
     let url = format!(
         "https://api.github.com/app/installations/{}/access_tokens",
         installation_id
