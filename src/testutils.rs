@@ -37,7 +37,7 @@ impl Workload for TestWorkload {
     }
 
     fn interval(&self) -> Duration {
-        Duration::from_millis(25)
+        Duration::from_secs(1)
     }
 
     fn work(&self, _workdir: PathBuf, _current_sha: ObjectId) -> Result<ObjectId, GitOpsError> {

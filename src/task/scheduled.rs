@@ -30,7 +30,7 @@ impl<W: Workload + Clone + Send + 'static> ScheduledTask<W> {
     }
 
     pub fn is_eligible(&self) -> bool {
-        self.worker.is_none() && self.state.next_run < SystemTime::now()
+        self.worker.is_none() && SystemTime::now() >= self.state.next_run
     }
 
     pub fn is_running(&self) -> bool {
