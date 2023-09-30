@@ -1,5 +1,6 @@
 use std::{
     path::PathBuf,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -10,15 +11,14 @@ use crate::{
     receiver::ActionOutput,
 };
 
-use super::{
-    github::{update_commit_status, GitHubStatus},
-    GitTaskConfig, Workload,
-};
+use super::{GitTaskConfig, Workload};
 
 #[derive(Clone)]
 pub struct GitWorkload {
     config: GitTaskConfig,
     repo_dir: PathBuf,
+    watchers:
+        Vec<Arc<Mutex<Box<dyn Fn(ActionOutput) -> Result<(), GitOpsError> + Send + 'static>>>>,
 }
 
 impl GitWorkload {
@@ -28,7 +28,18 @@ impl GitWorkload {
             .as_ref()
             .map(|dir| dir.join(config.git.safe_url()))
             .unwrap();
-        GitWorkload { config, repo_dir }
+        GitWorkload {
+            config,
+            repo_dir,
+            watchers: Vec::new(),
+        }
+    }
+
+    pub fn watch(
+        &mut self,
+        watcher: impl Fn(ActionOutput) -> Result<(), GitOpsError> + Send + 'static,
+    ) {
+        self.watchers.push(Arc::new(Mutex::new(Box::new(watcher))));
     }
 }
 
@@ -41,35 +52,34 @@ impl Workload for GitWorkload {
         self.config.interval
     }
 
-    fn work<F>(
-        &self,
-        workdir: PathBuf,
-        current_sha: ObjectId,
-        sink: F,
-    ) -> Result<ObjectId, GitOpsError>
-    where
-        F: Fn(ActionOutput) -> Result<(), GitOpsError> + Clone + Send + 'static,
-    {
+    // TODO: Take ownership of self to skip the clonefest
+    fn work(&self, workdir: PathBuf, current_sha: ObjectId) -> Result<ObjectId, GitOpsError> {
         let config = self.config.clone();
         let task_id = config.name.clone();
         let repodir = self.repo_dir.clone();
         let deadline = Instant::now() + config.timeout;
+        let watchers = self.watchers.clone();
+        let sink = Arc::new(Mutex::new(move |event: ActionOutput| {
+            for watcher in &watchers {
+                watcher.lock().unwrap()(event.clone())?;
+            }
+            Ok(())
+        }));
 
         let new_sha = ensure_worktree(&config.git, deadline, &repodir, &workdir)?;
         if current_sha != new_sha {
-            sink(ActionOutput::Changes(
+            sink.lock().unwrap()(ActionOutput::Changes(
                 config.name.clone(),
                 current_sha,
                 new_sha,
             ))
-            .map_err(|err| GitOpsError::SendError(format!("{}", err)))?;
+            .map_err(|err| GitOpsError::NotifyError(format!("{}", err)))?;
             for action in config.actions {
                 let name = format!("{}|{}", task_id, action.id());
                 run_action(&name, &action, &workdir, deadline, &sink)?;
             }
-        }
-        if let Some(cfg) = config.notify {
-            update_commit_status(&cfg, &new_sha.to_string(), GitHubStatus::Success, "Did it")?;
+            sink.lock().unwrap()(ActionOutput::Success(config.name.clone(), new_sha))
+                .map_err(|err| GitOpsError::NotifyError(format!("{}", err)))?;
         }
         std::fs::remove_dir_all(&workdir).map_err(GitOpsError::WorkDir)?;
         Ok(new_sha)

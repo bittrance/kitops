@@ -1,4 +1,4 @@
-use std::{sync::mpsc::Sender, thread::sleep, time::Duration};
+use std::{thread::sleep, time::Duration};
 
 use task::{scheduled::ScheduledTask, Workload};
 
@@ -22,7 +22,6 @@ pub enum Progress {
 pub fn run_tasks<F, W>(
     tasks: &mut [ScheduledTask<W>],
     mut persist: F,
-    tx: &Sender<receiver::ActionOutput>,
     once_only: bool,
     poll_interval: Duration,
 ) -> Result<(), errors::GitOpsError>
@@ -31,7 +30,7 @@ where
     W: Workload + Clone + Send + 'static,
 {
     loop {
-        let res = progress_one_task(tasks, &mut persist, tx)?;
+        let res = progress_one_task(tasks, &mut persist)?;
         if res == Progress::Idle {
             if once_only {
                 // TODO: We should remove tasks from the list? Current strategy will
@@ -47,15 +46,13 @@ where
 fn progress_one_task<F, W>(
     tasks: &mut [ScheduledTask<W>],
     persist: &mut F,
-    tx: &Sender<receiver::ActionOutput>,
 ) -> Result<Progress, errors::GitOpsError>
 where
     F: FnMut(&ScheduledTask<W>) -> Result<(), errors::GitOpsError>,
     W: Workload + Clone + Send + 'static,
 {
     if let Some(task) = tasks.iter_mut().find(|t| t.is_eligible()) {
-        let task_tx = tx.clone();
-        task.start(task_tx)?;
+        task.start()?;
         task.schedule_next();
         persist(task)?;
         return Ok(Progress::Running);
@@ -76,6 +73,8 @@ where
 mod lib {
     use std::time::{Duration, SystemTime};
 
+    use gix::{hash::Kind, ObjectId};
+
     use crate::{
         task::{scheduled::ScheduledTask, State},
         testutils::TestWorkload,
@@ -84,16 +83,15 @@ mod lib {
     #[test]
     fn run_eligible_task() {
         let mut tasks = vec![ScheduledTask::new(TestWorkload::default())];
-        let (tx, _) = std::sync::mpsc::channel();
         let mut persist = |_t: &ScheduledTask<TestWorkload>| Ok(());
-        let progress = super::progress_one_task(&mut tasks[..], &mut persist, &tx).unwrap();
+        let progress = super::progress_one_task(&mut tasks[..], &mut persist).unwrap();
         assert!(progress == super::Progress::Running);
         assert!(tasks[0].is_running());
         tasks[0].await_finished();
-        let progress = super::progress_one_task(&mut tasks[..], &mut persist, &tx).unwrap();
+        let progress = super::progress_one_task(&mut tasks[..], &mut persist).unwrap();
         assert!(progress == super::Progress::Running);
         assert!(!tasks[0].is_finished());
-        let progress = super::progress_one_task(&mut tasks[..], &mut persist, &tx).unwrap();
+        let progress = super::progress_one_task(&mut tasks[..], &mut persist).unwrap();
         assert!(progress == super::Progress::Idle);
     }
 
@@ -101,12 +99,11 @@ mod lib {
     fn dont_start_ineligible_task() {
         let mut tasks = vec![ScheduledTask::new(TestWorkload::default())];
         tasks[0].set_state(State {
+            current_sha: ObjectId::empty_blob(Kind::Sha1),
             next_run: SystemTime::now() + Duration::from_secs(1),
-            current_sha: Default::default(),
         });
-        let (tx, _) = std::sync::mpsc::channel();
         let mut persist = |_t: &ScheduledTask<TestWorkload>| Ok(());
-        let progress = super::progress_one_task(&mut tasks[..], &mut persist, &tx).unwrap();
+        let progress = super::progress_one_task(&mut tasks[..], &mut persist).unwrap();
         assert!(progress == super::Progress::Idle);
     }
 }

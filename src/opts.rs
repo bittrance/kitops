@@ -1,4 +1,4 @@
-use std::{fs::File, path::PathBuf, time::Duration};
+use std::{fs::File, path::PathBuf, sync::mpsc::channel, thread::spawn, time::Duration};
 
 use clap::Parser;
 use serde::Deserialize;
@@ -6,8 +6,14 @@ use serde::Deserialize;
 use crate::{
     actions::Action,
     errors::GitOpsError,
+    receiver::{logging_receiver, ActionOutput},
     store::{FileStore, Store},
-    task::{gixworkload::GitWorkload, scheduled::ScheduledTask, GitTaskConfig},
+    task::{
+        github::{update_commit_status, GitHubStatus},
+        gixworkload::GitWorkload,
+        scheduled::ScheduledTask,
+        GitTaskConfig,
+    },
 };
 
 const DEFAULT_BRANCH: &str = "main";
@@ -94,6 +100,38 @@ struct ConfigFile {
     tasks: Vec<GitTaskConfig>,
 }
 
+fn into_task(mut config: GitTaskConfig, opts: &CliOptions) -> ScheduledTask<GitWorkload> {
+    let notify_config = config.notify.take();
+    let mut work = GitWorkload::from_config(config, opts);
+    if let Some(notify_config) = notify_config {
+        work.watch(move |event| {
+            match event {
+                // TODO Need to wire for failure/error
+                ActionOutput::Success(_, new_sha) => {
+                    update_commit_status(
+                        &notify_config,
+                        &new_sha,
+                        GitHubStatus::Success,
+                        "success",
+                    )?;
+                }
+                _ => (),
+            };
+            Ok(())
+        });
+    }
+    let (tx, rx) = channel();
+    work.watch(move |event| {
+        tx.send(event)
+            .map_err(|e| GitOpsError::NotifyError(format!("{}", e)))
+    });
+    // TODO Handle TERM
+    spawn(move || {
+        logging_receiver(&rx);
+    });
+    ScheduledTask::new(work)
+}
+
 fn tasks_from_file(opts: &CliOptions) -> Result<Vec<ScheduledTask<GitWorkload>>, GitOpsError> {
     let config =
         File::open(opts.config_file.clone().unwrap()).map_err(GitOpsError::MissingConfig)?;
@@ -102,7 +140,7 @@ fn tasks_from_file(opts: &CliOptions) -> Result<Vec<ScheduledTask<GitWorkload>>,
     Ok(config_file
         .tasks
         .into_iter()
-        .map(|c| ScheduledTask::new(GitWorkload::from_config(c, opts)))
+        .map(|c| into_task(c, opts))
         .collect())
 }
 
@@ -110,9 +148,7 @@ fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<ScheduledTask<GitWorkload>>,
     let mut config: GitTaskConfig = TryFrom::try_from(opts)?;
     let action: Action = TryFrom::try_from(opts)?;
     config.add_action(action);
-    let work = GitWorkload::from_config(config, opts);
-    let task = ScheduledTask::new(work);
-    Ok(vec![task])
+    Ok(vec![into_task(config, opts)])
 }
 
 pub fn load_tasks(opts: &CliOptions) -> Result<Vec<ScheduledTask<GitWorkload>>, GitOpsError> {

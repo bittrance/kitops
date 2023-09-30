@@ -3,6 +3,7 @@ use std::{
     io::Read,
     path::Path,
     process::{Command, Stdio},
+    sync::{Arc, Mutex},
     thread::{sleep, spawn, JoinHandle},
     time::{Duration, Instant},
 };
@@ -74,13 +75,13 @@ fn emit_data<F, R>(
     name: String,
     mut source: R,
     source_type: SourceType,
-    sink: &F,
+    sink: &Arc<Mutex<F>>,
 ) -> JoinHandle<Result<(), GitOpsError>>
 where
     R: Read + Send + 'static,
-    F: Fn(ActionOutput) -> Result<(), GitOpsError> + Clone + Send + 'static,
+    F: Fn(ActionOutput) -> Result<(), GitOpsError> + Send + 'static,
 {
-    let sink = sink.clone();
+    let sink = Arc::clone(sink);
     spawn(move || {
         let mut buf: [u8; 4096] = [0; 4096];
         loop {
@@ -88,7 +89,7 @@ where
             if len == 0 {
                 break;
             }
-            sink(ActionOutput::Output(
+            sink.lock().unwrap()(ActionOutput::Output(
                 name.clone(),
                 source_type,
                 buf[..len].into(),
@@ -103,10 +104,10 @@ pub fn run_action<F>(
     action: &Action,
     cwd: &Path,
     deadline: Instant,
-    sink: &F,
+    sink: &Arc<Mutex<F>>,
 ) -> Result<(), GitOpsError>
 where
-    F: Fn(ActionOutput) -> Result<(), GitOpsError> + Clone + Send + 'static,
+    F: Fn(ActionOutput) -> Result<(), GitOpsError> + Send + 'static,
 {
     let mut command = build_command(action, cwd);
     let mut child = command.spawn().map_err(GitOpsError::ActionError)?;
@@ -117,12 +118,12 @@ where
     emit_data(name.to_string(), stderr, SourceType::StdErr, sink);
     loop {
         if let Some(exit) = child.try_wait().map_err(GitOpsError::ActionError)? {
-            sink(ActionOutput::Exit(name.to_string(), exit))?;
+            sink.lock().unwrap()(ActionOutput::Exit(name.to_string(), exit))?;
             break;
         }
         if Instant::now() > deadline {
             child.kill().map_err(GitOpsError::ActionError)?;
-            sink(ActionOutput::Timeout(name.to_string()))?;
+            sink.lock().unwrap()(ActionOutput::Timeout(name.to_string()))?;
             break;
         }
         sleep(Duration::from_secs(1));
@@ -155,10 +156,10 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         let events = Arc::new(Mutex::new(Vec::new()));
         let events2 = events.clone();
-        let sink = move |event| {
+        let sink = Arc::new(Mutex::new(move |event| {
             events2.lock().unwrap().push(event);
             Ok(())
-        };
+        }));
         run_action("test", &action, workdir.path(), deadline, &sink).unwrap();
         assert_eq!(
             vec![

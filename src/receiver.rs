@@ -8,11 +8,13 @@ pub enum SourceType {
     StdErr,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ActionOutput {
+    // TODO Name types would be nice
     Changes(String, ObjectId, ObjectId),
     Output(String, SourceType, Vec<u8>),
     Exit(String, ExitStatus),
+    Success(String, ObjectId),
     Timeout(String),
 }
 
@@ -32,6 +34,9 @@ pub fn logging_receiver(events: &Receiver<ActionOutput>) {
             },
             ActionOutput::Exit(name, exit) => println!("{}: exited with code {}", name, exit),
             ActionOutput::Timeout(name) => println!("{}: took too long", name),
+            ActionOutput::Success(name, new_sha) => {
+                print!("{}: actions successful for {}", name, new_sha)
+            }
         }
     }
 }

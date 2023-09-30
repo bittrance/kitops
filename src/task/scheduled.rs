@@ -1,13 +1,12 @@
 use std::{
     ops::Add,
-    sync::mpsc::Sender,
     thread::{spawn, JoinHandle},
     time::SystemTime,
 };
 
 use gix::ObjectId;
 
-use crate::{errors::GitOpsError, receiver::ActionOutput};
+use crate::errors::GitOpsError;
 
 use super::{State, Workload};
 
@@ -46,17 +45,13 @@ impl<W: Workload + Clone + Send + 'static> ScheduledTask<W> {
         self.state.next_run = SystemTime::now().add(self.work.interval());
     }
 
-    pub fn start(&mut self, tx: Sender<ActionOutput>) -> Result<(), GitOpsError> {
+    pub fn start(&mut self) -> Result<(), GitOpsError> {
         let current_sha = self.state.current_sha;
         let workdir = tempfile::tempdir()
             .map_err(GitOpsError::WorkDir)?
             .into_path();
-        let sink = move |event| {
-            tx.send(event)
-                .map_err(|err| GitOpsError::SendError(format!("{}", err)))
-        };
         let work = self.work.clone();
-        self.worker = Some(spawn(move || work.work(workdir, current_sha, sink)));
+        self.worker = Some(spawn(move || work.work(workdir, current_sha)));
         Ok(())
     }
 
@@ -82,20 +77,25 @@ impl<W: Workload + Clone + Send + 'static> ScheduledTask<W> {
 
 #[cfg(test)]
 mod tests {
-    use std::{time::{Duration, SystemTime}, thread::sleep};
+    use std::{
+        thread::sleep,
+        time::{Duration, SystemTime},
+    };
 
     use gix::ObjectId;
 
-    use crate::{task::{scheduled::ScheduledTask, State}, testutils::TestWorkload};
+    use crate::{
+        task::{scheduled::ScheduledTask, State},
+        testutils::TestWorkload,
+    };
 
     #[test]
     fn scheduled_task_flow() {
-        let (tx, _) = std::sync::mpsc::channel();
         let mut task = ScheduledTask::new(TestWorkload::default());
         assert!(task.is_eligible());
         assert!(!task.is_running());
         assert!(!task.is_finished());
-        task.start(tx).unwrap();
+        task.start().unwrap();
         assert!(!task.is_eligible());
         assert!(task.is_running());
         assert!(!task.is_finished());

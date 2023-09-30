@@ -39,7 +39,7 @@ pub enum GitOpsError {
     #[error("Failed to open repository: {0}")]
     OpenRepo(gix::open::Error),
     #[error("Failed to send event: {0}")]
-    SendError(String),
+    NotifyError(String),
     #[error("Failed to launch action: {0}")]
     ActionError(std::io::Error),
     #[error("Missing private key file: {0}")]

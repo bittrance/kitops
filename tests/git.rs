@@ -1,69 +1,12 @@
-use tempfile::TempDir;
-use xshell::{cmd, Shell};
+use xshell::cmd;
 
-use std::{
-    path::Path,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use kitops::git::{ensure_worktree, GitConfig};
 
-static TEST_CONFIG: &str = r#"
-url: https://github.com/bittrance/kitops
-branch: main
-"#;
+use utils::{clone_repo, commit_file, empty_repo, reset_branch, shell, TEST_CONFIG};
 
-fn shell() -> Shell {
-    let sh = Shell::new().unwrap();
-    sh.set_var("GIT_CONFIG_SYSTEM", "/dev/null");
-    sh.set_var("GIT_CONFIG_GLOBAL", "/dev/null");
-    sh
-}
-
-fn empty_repo(sh: &Shell) -> TempDir {
-    let upstream = tempfile::tempdir().unwrap();
-    let ref pupstream = upstream.path();
-    cmd!(sh, "git init -b main {pupstream}")
-        .ignore_stdout()
-        .run()
-        .unwrap();
-    upstream
-}
-
-fn clone_repo<P>(sh: &Shell, source: P) -> TempDir
-where
-    P: AsRef<Path>,
-{
-    let repodir = tempfile::tempdir().unwrap();
-    let ref psource = source.as_ref().as_os_str();
-    let ref prepodir = repodir.path();
-    cmd!(sh, "git clone -q {psource} {prepodir}")
-        .ignore_stdout()
-        .run()
-        .unwrap();
-    repodir
-}
-
-fn commit_file<P>(dir: P, content: &str) -> String
-where
-    P: AsRef<Path>,
-{
-    let dir = dir.as_ref();
-    let sh = shell();
-    sh.change_dir(dir);
-    sh.write_file(dir.join("ze-file"), content).unwrap();
-    cmd!(sh, "git add ze-file").ignore_stdout().run().unwrap();
-    cmd!(sh, "git -c user.email=testing@example.com -c user.name=Testing commit -m 'Committing {content}'").ignore_stdout().run().unwrap();
-    cmd!(sh, "git rev-parse HEAD").read().unwrap()
-}
-
-fn reset_branch(sh: &Shell, dir: &TempDir, target: &str) {
-    sh.change_dir(dir.path());
-    cmd!(sh, "git reset --hard {target}")
-        .ignore_stdout()
-        .run()
-        .unwrap();
-}
+mod utils;
 
 #[test]
 fn clone_repo_from_github_https() {

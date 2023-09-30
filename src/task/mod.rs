@@ -6,9 +6,7 @@ use std::{
 use gix::{hash::Kind, ObjectId, Url};
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::{
-    actions::Action, errors::GitOpsError, git::GitConfig, opts::CliOptions, receiver::ActionOutput,
-};
+use crate::{actions::Action, errors::GitOpsError, git::GitConfig, opts::CliOptions};
 
 pub mod github;
 pub mod gixworkload;
@@ -17,14 +15,7 @@ pub mod scheduled;
 pub trait Workload {
     fn id(&self) -> String;
     fn interval(&self) -> Duration;
-    fn work<F>(
-        &self,
-        workdir: PathBuf,
-        current_sha: ObjectId,
-        sink: F,
-    ) -> Result<ObjectId, GitOpsError>
-    where
-        F: Fn(ActionOutput) -> Result<(), GitOpsError> + Clone + Send + 'static;
+    fn work(&self, workdir: PathBuf, current_sha: ObjectId) -> Result<ObjectId, GitOpsError>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -54,7 +45,7 @@ where
 pub struct GitTaskConfig {
     name: String,
     git: GitConfig,
-    notify: Option<github::GitHubNotifyConfig>,
+    pub notify: Option<github::GitHubNotifyConfig>,
     actions: Vec<Action>,
     #[serde(
         default = "GitTaskConfig::default_interval",

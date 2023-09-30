@@ -1,5 +1,6 @@
 use std::{fs::File, io::Read, path::PathBuf, time::Duration};
 
+use gix::ObjectId;
 use jwt_simple::prelude::{Claims, RS256KeyPair, RSAKeyPairLike};
 use reqwest::{
     blocking::ClientBuilder,
@@ -140,7 +141,7 @@ fn get_access_token(
 
 pub fn update_commit_status(
     config: &GitHubNotifyConfig,
-    sha: &str,
+    sha: &ObjectId,
     status: GitHubStatus,
     message: &str,
 ) -> Result<(), GitOpsError> {

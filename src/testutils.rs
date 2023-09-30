@@ -9,8 +9,7 @@ use gix::ObjectId;
 
 use crate::{
     errors::GitOpsError,
-    receiver::ActionOutput,
-    task::{Workload, scheduled::ScheduledTask},
+    task::{scheduled::ScheduledTask, Workload},
 };
 
 impl<W: Workload + Clone + Send + 'static> ScheduledTask<W> {
@@ -41,15 +40,7 @@ impl Workload for TestWorkload {
         Duration::from_millis(25)
     }
 
-    fn work<F>(
-        &self,
-        _workdir: PathBuf,
-        _current_sha: ObjectId,
-        _sink: F,
-    ) -> Result<ObjectId, GitOpsError>
-    where
-        F: Fn(ActionOutput) -> Result<(), GitOpsError> + Clone + Send + 'static,
-    {
+    fn work(&self, _workdir: PathBuf, _current_sha: ObjectId) -> Result<ObjectId, GitOpsError> {
         self.status
             .store(true, std::sync::atomic::Ordering::Relaxed);
         sleep(Duration::from_millis(10));
