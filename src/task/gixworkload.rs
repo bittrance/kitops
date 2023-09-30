@@ -13,6 +13,7 @@ use crate::{
 
 use super::{GitTaskConfig, Workload};
 
+#[allow(clippy::type_complexity)]
 #[derive(Clone)]
 pub struct GitWorkload {
     config: GitTaskConfig,
@@ -78,7 +79,7 @@ impl Workload for GitWorkload {
                 let name = format!("{}|{}", task_id, action.id());
                 run_action(&name, &action, &workdir, deadline, &sink)?;
             }
-            sink.lock().unwrap()(ActionOutput::Success(config.name.clone(), new_sha))
+            sink.lock().unwrap()(ActionOutput::Success(config.name, new_sha))
                 .map_err(|err| GitOpsError::NotifyError(format!("{}", err)))?;
         }
         std::fs::remove_dir_all(&workdir).map_err(GitOpsError::WorkDir)?;

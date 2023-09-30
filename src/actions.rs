@@ -134,7 +134,6 @@ where
 #[cfg(test)]
 mod tests {
     use std::{
-        os::unix::process::ExitStatusExt,
         process::ExitStatus,
         sync::{Arc, Mutex},
     };
@@ -145,6 +144,8 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn test_run_action() {
+        use std::os::unix::process::ExitStatusExt;
+
         let action = Action {
             name: "test".to_string(),
             entrypoint: "/bin/sh".to_string(),
