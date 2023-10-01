@@ -9,7 +9,7 @@ use reqwest::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{errors::GitOpsError, opts::CliOptions};
+use crate::{errors::GitOpsError, opts::CliOptions, receiver::ActionOutput};
 
 #[derive(Clone, Deserialize)]
 pub struct GitHubNotifyConfig {
@@ -179,5 +179,46 @@ pub fn update_commit_status(
             res.text()
                 .unwrap_or("GitHub Api returned unparseable error".to_owned()),
         ))
+    }
+}
+
+pub fn github_watcher(notify_config: GitHubNotifyConfig) -> impl Fn(ActionOutput) -> Result<(), GitOpsError> + Send + 'static {
+    move |event| {
+        match event {
+            ActionOutput::Changes(name, prev_sha, new_sha) => {
+                update_commit_status(
+                    &notify_config,
+                    &new_sha,
+                    GitHubStatus::Pending,
+                    &format!("running {} [last success {}]", name, prev_sha),
+                )?;
+            }
+            ActionOutput::Success(name, new_sha) => {
+                update_commit_status(
+                    &notify_config,
+                    &new_sha,
+                    GitHubStatus::Success,
+                    &format!("{} succeeded", name),
+                )?;
+            }
+            ActionOutput::Failure(task, action, new_sha) => {
+                update_commit_status(
+                    &notify_config,
+                    &new_sha,
+                    GitHubStatus::Failure,
+                    &format!("{} failed on action {}", task, action),
+                )?;
+            }
+            ActionOutput::Error(task, action, new_sha) => {
+                update_commit_status(
+                    &notify_config,
+                    &new_sha,
+                    GitHubStatus::Error,
+                    &format!("{} errored on action {}", task, action),
+                )?;
+            }
+            _ => (),
+        };
+        Ok(())
     }
 }

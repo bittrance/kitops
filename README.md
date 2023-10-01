@@ -12,9 +12,9 @@ The plan forward, roughly in falling priority:
 - [ ] verify azdo support - Byron/gitoxide#1025
 - [x] Reasonable timeout duration entry (i.e. not serde default secs/nanos)
 - [x] Errors in scoped blocks should cancel, not wait for watchdog to reach deadline
-- [ ] allow configuring notification actions
+- [x] allow configuring notification actions
 - [x] proper options validation (e.g. config-file xor url/action)
-- [ ] specialized notification action to update github status
+- [x] specialized notification action to update github status
 - [ ] new git sha and branch name in action env vars
 - [ ] changed task config should override state loaded from disk
 - [ ] docker packaging

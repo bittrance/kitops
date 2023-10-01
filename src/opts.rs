@@ -4,12 +4,11 @@ use clap::Parser;
 use serde::Deserialize;
 
 use crate::{
-    actions::Action,
     errors::GitOpsError,
-    receiver::{logging_receiver, ActionOutput},
+    receiver::logging_receiver,
     store::{FileStore, Store},
     task::{
-        github::{update_commit_status, GitHubStatus},
+        github::github_watcher,
         gixworkload::GitWorkload,
         scheduled::ScheduledTask,
         GitTaskConfig,
@@ -104,21 +103,7 @@ fn into_task(mut config: GitTaskConfig, opts: &CliOptions) -> ScheduledTask<GitW
     let notify_config = config.notify.take();
     let mut work = GitWorkload::from_config(config, opts);
     if let Some(notify_config) = notify_config {
-        work.watch(move |event| {
-            match event {
-                // TODO Need to wire for failure/error
-                ActionOutput::Success(_, new_sha) => {
-                    update_commit_status(
-                        &notify_config,
-                        &new_sha,
-                        GitHubStatus::Success,
-                        "success",
-                    )?;
-                }
-                _ => (),
-            };
-            Ok(())
-        });
+        work.watch(github_watcher(notify_config));
     }
     let (tx, rx) = channel();
     work.watch(move |event| {
@@ -145,9 +130,7 @@ fn tasks_from_file(opts: &CliOptions) -> Result<Vec<ScheduledTask<GitWorkload>>,
 }
 
 fn tasks_from_opts(opts: &CliOptions) -> Result<Vec<ScheduledTask<GitWorkload>>, GitOpsError> {
-    let mut config: GitTaskConfig = TryFrom::try_from(opts)?;
-    let action: Action = TryFrom::try_from(opts)?;
-    config.add_action(action);
+    let config: GitTaskConfig = TryFrom::try_from(opts)?;
     Ok(vec![into_task(config, opts)])
 }
 

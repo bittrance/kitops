@@ -15,6 +15,8 @@ pub enum ActionOutput {
     Output(String, SourceType, Vec<u8>),
     Exit(String, ExitStatus),
     Success(String, ObjectId),
+    Failure(String, String, ObjectId),
+    Error(String, String, ObjectId),
     Timeout(String),
 }
 
@@ -33,10 +35,16 @@ pub fn logging_receiver(events: &Receiver<ActionOutput>) {
                 SourceType::StdErr => eprintln!("{}: {}", name, String::from_utf8_lossy(&data)),
             },
             ActionOutput::Exit(name, exit) => println!("{}: exited with code {}", name, exit),
-            ActionOutput::Timeout(name) => println!("{}: took too long", name),
             ActionOutput::Success(name, new_sha) => {
-                print!("{}: actions successful for {}", name, new_sha)
+                println!("{}: actions successful for {}", name, new_sha)
             }
+            ActionOutput::Failure(task, action, new_sha) => {
+                println!("{}: action {} failed for {}", task, action, new_sha)
+            }
+            ActionOutput::Error(name, error, new_sha) => {
+                println!("{}: error running actions for {}: {}", name, new_sha, error)
+            }
+            ActionOutput::Timeout(name) => println!("{}: took too long", name),
         }
     }
 }

@@ -16,7 +16,13 @@ use crate::{
     receiver::{ActionOutput, SourceType},
 };
 
-#[derive(Clone, Deserialize)]
+#[derive(Debug, PartialEq)]
+pub enum ActionResult {
+    Success,
+    Failure,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct Action {
     name: String,
     entrypoint: String,
@@ -47,6 +53,7 @@ impl TryFrom<&CliOptions> for Action {
         }
         Ok(Self {
             name: opts.action.clone().unwrap(),
+            // TODO --action won't work on Windows
             entrypoint: "/bin/sh".to_string(),
             args: vec!["-c".to_string(), opts.action.clone().unwrap()],
             environment,
@@ -105,7 +112,7 @@ pub fn run_action<F>(
     cwd: &Path,
     deadline: Instant,
     sink: &Arc<Mutex<F>>,
-) -> Result<(), GitOpsError>
+) -> Result<ActionResult, GitOpsError>
 where
     F: Fn(ActionOutput) -> Result<(), GitOpsError> + Send + 'static,
 {
@@ -119,16 +126,19 @@ where
     loop {
         if let Some(exit) = child.try_wait().map_err(GitOpsError::ActionError)? {
             sink.lock().unwrap()(ActionOutput::Exit(name.to_string(), exit))?;
-            break;
+            if exit.success() {
+                break Ok(ActionResult::Success);
+            } else {
+                break Ok(ActionResult::Failure);
+            }
         }
         if Instant::now() > deadline {
             child.kill().map_err(GitOpsError::ActionError)?;
             sink.lock().unwrap()(ActionOutput::Timeout(name.to_string()))?;
-            break;
+            break Ok(ActionResult::Failure);
         }
         sleep(Duration::from_secs(1));
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -141,18 +151,22 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn shell_action(cmd: &str) -> Action {
+        Action {
+            name: "test".to_owned(),
+            entrypoint: "/bin/sh".to_owned(),
+            args: vec!["-c".to_owned(), cmd.to_owned()],
+            environment: HashMap::new(),
+            inherit_environment: false,
+        }
+    }
+
     #[test]
     #[cfg(unix)]
     fn test_run_action() {
         use std::os::unix::process::ExitStatusExt;
 
-        let action = Action {
-            name: "test".to_string(),
-            entrypoint: "/bin/sh".to_string(),
-            args: vec!["-c".to_string(), "echo test".to_string()],
-            environment: HashMap::new(),
-            inherit_environment: false,
-        };
+        let action = shell_action("echo test");
         let workdir = tempdir().unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         let events = Arc::new(Mutex::new(Vec::new()));
@@ -161,7 +175,8 @@ mod tests {
             events2.lock().unwrap().push(event);
             Ok(())
         }));
-        run_action("test", &action, workdir.path(), deadline, &sink).unwrap();
+        let res = run_action("test", &action, workdir.path(), deadline, &sink);
+        assert!(matches!(res, Ok(ActionResult::Success)));
         assert_eq!(
             vec![
                 ActionOutput::Output("test".to_owned(), SourceType::StdOut, b"test\n".to_vec()),
@@ -169,5 +184,16 @@ mod tests {
             ],
             events.lock().unwrap()[..]
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_run_failing_action() {
+        let action = shell_action("exit 1");
+        let workdir = tempdir().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let sink = Arc::new(Mutex::new(move |_| Ok(())));
+        let res = run_action("test", &action, workdir.path(), deadline, &sink);
+        assert!(matches!(res, Ok(ActionResult::Failure)));
     }
 }

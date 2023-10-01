@@ -70,11 +70,12 @@ impl TryFrom<&CliOptions> for GitTaskConfig {
 
     fn try_from(opts: &CliOptions) -> Result<Self, Self::Error> {
         let url = Url::try_from(opts.url.clone().unwrap()).map_err(GitOpsError::InvalidUrl)?;
+        let action: Action = TryFrom::try_from(opts)?;
         Ok(Self {
             name: url.path.to_string(),
             git: TryFrom::try_from(opts)?,
             notify: TryFrom::try_from(opts)?,
-            actions: Vec::new(),
+            actions: vec![action],
             interval: opts.interval.unwrap_or(Self::default_interval()),
             timeout: opts.timeout.unwrap_or(Self::default_timeout()),
         })
