@@ -120,11 +120,12 @@ where
     let mut child = command.spawn().map_err(GitOpsError::ActionError)?;
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
-    // TODO Proper cleanup; break read threads, et c
-    emit_data(name.to_string(), stdout, SourceType::StdOut, sink);
-    emit_data(name.to_string(), stderr, SourceType::StdErr, sink);
+    let out_t = emit_data(name.to_string(), stdout, SourceType::StdOut, sink);
+    let err_t = emit_data(name.to_string(), stderr, SourceType::StdErr, sink);
     loop {
         if let Some(exit) = child.try_wait().map_err(GitOpsError::ActionError)? {
+            out_t.join().unwrap()?;
+            err_t.join().unwrap()?;
             sink.lock().unwrap()(WorkloadEvent::ActionExit(name.to_string(), exit))?;
             if exit.success() {
                 break Ok(ActionResult::Success);
@@ -134,6 +135,8 @@ where
         }
         if Instant::now() > deadline {
             child.kill().map_err(GitOpsError::ActionError)?;
+            out_t.join().unwrap()?;
+            err_t.join().unwrap()?;
             sink.lock().unwrap()(WorkloadEvent::Timeout(name.to_string()))?;
             break Ok(ActionResult::Failure);
         }
@@ -196,6 +199,17 @@ mod tests {
         let action = shell_action("exit 1");
         let workdir = tempdir().unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
+        let sink = Arc::new(Mutex::new(move |_| Ok(())));
+        let res = run_action("test", &action, workdir.path(), deadline, &sink);
+        assert!(matches!(res, Ok(ActionResult::Failure)));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn timing_out_action() {
+        let action = shell_action("sleep 1");
+        let workdir = tempdir().unwrap();
+        let deadline = Instant::now();
         let sink = Arc::new(Mutex::new(move |_| Ok(())));
         let res = run_action("test", &action, workdir.path(), deadline, &sink);
         assert!(matches!(res, Ok(ActionResult::Failure)));
