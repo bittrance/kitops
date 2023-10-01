@@ -85,7 +85,7 @@ fn watch_failing_workload() {
     let repodir = tempfile::tempdir().unwrap();
     let workdir = tempfile::tempdir().unwrap();
     let opts = cli_options(&repodir);
-    let config = config(&upstream, "/bin/false");
+    let config = config(&upstream, "/usr/bin/false");
     let mut workload = GitWorkload::from_config(config, &opts);
     let events = Arc::new(Mutex::new(Vec::new()));
     let events2 = events.clone();
