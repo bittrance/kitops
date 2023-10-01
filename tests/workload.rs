@@ -3,25 +3,22 @@ use std::sync::{Arc, Mutex};
 use clap::Parser;
 use gix::{hash::Kind, ObjectId};
 use kitops::{
+    errors::GitOpsError,
     opts::CliOptions,
-    receiver::ActionOutput,
-    task::{gixworkload::GitWorkload, GitTaskConfig, Workload}, errors::GitOpsError,
+    receiver::WorkloadEvent,
+    task::{gixworkload::GitWorkload, GitTaskConfig, Workload},
 };
 use utils::*;
 
 mod utils;
 
 fn cli_options(repodir: &tempfile::TempDir) -> CliOptions {
-    CliOptions::parse_from(&[
-        "kitops",
-        "--repo-dir",
-        &repodir.path().to_str().unwrap(),
-    ])
+    CliOptions::parse_from(&["kitops", "--repo-dir", &repodir.path().to_str().unwrap()])
 }
 
 fn config(upstream: &tempfile::TempDir, entrypoint: &str) -> GitTaskConfig {
     serde_yaml::from_str(&format!(
-       r#"
+        r#"
 name: ze-task
 git:
     url: file://{}
@@ -29,20 +26,28 @@ actions:
     - name: ze-action
       entrypoint: {}
 "#,
-    upstream.path().to_str().unwrap(), entrypoint))
+        upstream.path().to_str().unwrap(),
+        entrypoint
+    ))
     .unwrap()
 }
 
-fn non_action_events(events: Arc<Mutex<Vec<ActionOutput>>>) -> Vec<ActionOutput> {
+fn non_action_events(events: Arc<Mutex<Vec<WorkloadEvent>>>) -> Vec<WorkloadEvent> {
     events
         .lock()
         .unwrap()
         .iter()
-        .filter(|e| !matches!(e, ActionOutput::Output(..) | ActionOutput::Exit(..)))
+        .filter(|e| {
+            !matches!(
+                e,
+                WorkloadEvent::ActionOutput(..) | WorkloadEvent::ActionExit(..)
+            )
+        })
         .cloned()
         .collect::<Vec<_>>()
 }
 
+#[cfg(unix)]
 #[test]
 fn watch_successful_workload() {
     let sh = shell();
@@ -61,16 +66,17 @@ fn watch_successful_workload() {
         Ok(())
     });
     let prev_sha = ObjectId::empty_tree(Kind::Sha1);
-    workload.work(workdir.into_path(), prev_sha).unwrap();
+    workload.perform(workdir.into_path(), prev_sha).unwrap();
     assert_eq!(
         non_action_events(events),
         vec![
-            ActionOutput::Changes("ze-task".to_string(), prev_sha.clone(), next_sha),
-            ActionOutput::Success("ze-task".to_string(), next_sha),
+            WorkloadEvent::Changes("ze-task".to_string(), prev_sha.clone(), next_sha),
+            WorkloadEvent::Success("ze-task".to_string(), next_sha),
         ]
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn watch_failing_workload() {
     let sh = shell();
@@ -88,13 +94,14 @@ fn watch_failing_workload() {
         Ok(())
     });
     let prev_sha = ObjectId::empty_tree(Kind::Sha1);
-    workload.work(workdir.into_path(), prev_sha).unwrap();
+    workload.perform(workdir.into_path(), prev_sha).unwrap();
     let events = non_action_events(events);
     assert_eq!(events.len(), 2);
-    assert!(matches!(events[0], ActionOutput::Changes(..)));
-    assert!(matches!(events[1], ActionOutput::Failure(..)));
+    assert!(matches!(events[0], WorkloadEvent::Changes(..)));
+    assert!(matches!(events[1], WorkloadEvent::Failure(..)));
 }
 
+#[cfg(unix)]
 #[test]
 fn watch_erroring_workload() {
     let sh = shell();
@@ -112,10 +119,10 @@ fn watch_erroring_workload() {
         Ok(())
     });
     let prev_sha = ObjectId::empty_tree(Kind::Sha1);
-    let res = workload.work(workdir.into_path(), prev_sha);
+    let res = workload.perform(workdir.into_path(), prev_sha);
     assert!(matches!(res, Err(GitOpsError::ActionError(..))));
     let events = non_action_events(events);
     assert_eq!(events.len(), 2);
-    assert!(matches!(events[0], ActionOutput::Changes(..)));
-    assert!(matches!(events[1], ActionOutput::Error(..)));
+    assert!(matches!(events[0], WorkloadEvent::Changes(..)));
+    assert!(matches!(events[1], WorkloadEvent::Error(..)));
 }

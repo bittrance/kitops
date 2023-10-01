@@ -13,7 +13,7 @@ use serde::Deserialize;
 use crate::{
     errors::GitOpsError,
     opts::CliOptions,
-    receiver::{ActionOutput, SourceType},
+    receiver::{SourceType, WorkloadEvent},
 };
 
 #[derive(Debug, PartialEq)]
@@ -86,7 +86,7 @@ fn emit_data<F, R>(
 ) -> JoinHandle<Result<(), GitOpsError>>
 where
     R: Read + Send + 'static,
-    F: Fn(ActionOutput) -> Result<(), GitOpsError> + Send + 'static,
+    F: Fn(WorkloadEvent) -> Result<(), GitOpsError> + Send + 'static,
 {
     let sink = Arc::clone(sink);
     spawn(move || {
@@ -96,7 +96,7 @@ where
             if len == 0 {
                 break;
             }
-            sink.lock().unwrap()(ActionOutput::Output(
+            sink.lock().unwrap()(WorkloadEvent::ActionOutput(
                 name.clone(),
                 source_type,
                 buf[..len].into(),
@@ -114,7 +114,7 @@ pub fn run_action<F>(
     sink: &Arc<Mutex<F>>,
 ) -> Result<ActionResult, GitOpsError>
 where
-    F: Fn(ActionOutput) -> Result<(), GitOpsError> + Send + 'static,
+    F: Fn(WorkloadEvent) -> Result<(), GitOpsError> + Send + 'static,
 {
     let mut command = build_command(action, cwd);
     let mut child = command.spawn().map_err(GitOpsError::ActionError)?;
@@ -125,7 +125,7 @@ where
     emit_data(name.to_string(), stderr, SourceType::StdErr, sink);
     loop {
         if let Some(exit) = child.try_wait().map_err(GitOpsError::ActionError)? {
-            sink.lock().unwrap()(ActionOutput::Exit(name.to_string(), exit))?;
+            sink.lock().unwrap()(WorkloadEvent::ActionExit(name.to_string(), exit))?;
             if exit.success() {
                 break Ok(ActionResult::Success);
             } else {
@@ -134,7 +134,7 @@ where
         }
         if Instant::now() > deadline {
             child.kill().map_err(GitOpsError::ActionError)?;
-            sink.lock().unwrap()(ActionOutput::Timeout(name.to_string()))?;
+            sink.lock().unwrap()(WorkloadEvent::Timeout(name.to_string()))?;
             break Ok(ActionResult::Failure);
         }
         sleep(Duration::from_secs(1));
@@ -179,8 +179,12 @@ mod tests {
         assert!(matches!(res, Ok(ActionResult::Success)));
         assert_eq!(
             vec![
-                ActionOutput::Output("test".to_owned(), SourceType::StdOut, b"test\n".to_vec()),
-                ActionOutput::Exit("test".to_owned(), ExitStatus::from_raw(0)),
+                WorkloadEvent::ActionOutput(
+                    "test".to_owned(),
+                    SourceType::StdOut,
+                    b"test\n".to_vec()
+                ),
+                WorkloadEvent::ActionExit("test".to_owned(), ExitStatus::from_raw(0)),
             ],
             events.lock().unwrap()[..]
         );

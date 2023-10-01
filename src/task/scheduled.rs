@@ -51,7 +51,7 @@ impl<W: Workload + Clone + Send + 'static> ScheduledTask<W> {
             .map_err(GitOpsError::WorkDir)?
             .into_path();
         let work = self.work.clone();
-        self.worker = Some(spawn(move || work.work(workdir, current_sha)));
+        self.worker = Some(spawn(move || work.perform(workdir, current_sha)));
         Ok(())
     }
 

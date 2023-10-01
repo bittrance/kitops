@@ -1,5 +1,5 @@
 use std::{
-    path::{PathBuf, Path},
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -11,7 +11,7 @@ use crate::{
     errors::GitOpsError,
     git::ensure_worktree,
     opts::CliOptions,
-    receiver::ActionOutput,
+    receiver::WorkloadEvent,
 };
 
 use super::{GitTaskConfig, Workload};
@@ -22,7 +22,7 @@ pub struct GitWorkload {
     config: GitTaskConfig,
     repo_dir: PathBuf,
     watchers:
-        Vec<Arc<Mutex<Box<dyn Fn(ActionOutput) -> Result<(), GitOpsError> + Send + 'static>>>>,
+        Vec<Arc<Mutex<Box<dyn Fn(WorkloadEvent) -> Result<(), GitOpsError> + Send + 'static>>>>,
 }
 
 impl GitWorkload {
@@ -41,7 +41,7 @@ impl GitWorkload {
 
     pub fn watch(
         &mut self,
-        watcher: impl Fn(ActionOutput) -> Result<(), GitOpsError> + Send + 'static,
+        watcher: impl Fn(WorkloadEvent) -> Result<(), GitOpsError> + Send + 'static,
     ) {
         self.watchers.push(Arc::new(Mutex::new(Box::new(watcher))));
     }
@@ -50,7 +50,7 @@ impl GitWorkload {
         &self,
         workdir: &Path,
         deadline: Instant,
-        sink: &Arc<Mutex<impl Fn(ActionOutput) -> Result<(), GitOpsError> + Send + 'static>>,
+        sink: &Arc<Mutex<impl Fn(WorkloadEvent) -> Result<(), GitOpsError> + Send + 'static>>,
     ) -> Result<Option<String>, GitOpsError> {
         for action in &self.config.actions {
             let name = format!("{}|{}", self.config.name, action.id());
@@ -72,10 +72,10 @@ impl Workload for GitWorkload {
         self.config.interval
     }
 
-    fn work(&self, workdir: PathBuf, current_sha: ObjectId) -> Result<ObjectId, GitOpsError> {
+    fn perform(&self, workdir: PathBuf, current_sha: ObjectId) -> Result<ObjectId, GitOpsError> {
         let deadline = Instant::now() + self.config.timeout;
         let watchers = self.watchers.clone();
-        let sink = Arc::new(Mutex::new(move |event: ActionOutput| {
+        let sink = Arc::new(Mutex::new(move |event: WorkloadEvent| {
             for watcher in &watchers {
                 watcher.lock().unwrap()(event.clone())?;
             }
@@ -84,7 +84,7 @@ impl Workload for GitWorkload {
 
         let new_sha = ensure_worktree(&self.config.git, deadline, &self.repo_dir, &workdir)?;
         if current_sha != new_sha {
-            sink.lock().unwrap()(ActionOutput::Changes(
+            sink.lock().unwrap()(WorkloadEvent::Changes(
                 self.config.name.clone(),
                 current_sha,
                 new_sha,
@@ -92,11 +92,11 @@ impl Workload for GitWorkload {
             .map_err(|err| GitOpsError::NotifyError(format!("{}", err)))?;
             match self.run_actions(&workdir, deadline, &sink) {
                 Ok(None) => {
-                    sink.lock().unwrap()(ActionOutput::Success(self.config.name.clone(), new_sha))
+                    sink.lock().unwrap()(WorkloadEvent::Success(self.config.name.clone(), new_sha))
                         .map_err(|err| GitOpsError::NotifyError(format!("{}", err)))?
                 }
                 Ok(Some(action_name)) => {
-                    sink.lock().unwrap()(ActionOutput::Failure(
+                    sink.lock().unwrap()(WorkloadEvent::Failure(
                         self.config.name.clone(),
                         action_name,
                         new_sha,
@@ -104,7 +104,7 @@ impl Workload for GitWorkload {
                     .map_err(|err| GitOpsError::NotifyError(format!("{}", err)))?;
                 }
                 Err(err) => {
-                    sink.lock().unwrap()(ActionOutput::Error(
+                    sink.lock().unwrap()(WorkloadEvent::Error(
                         self.config.name.clone(),
                         format!("{}", err),
                         new_sha,

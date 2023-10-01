@@ -9,7 +9,7 @@ use reqwest::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{errors::GitOpsError, opts::CliOptions, receiver::ActionOutput};
+use crate::{errors::GitOpsError, opts::CliOptions, receiver::WorkloadEvent};
 
 #[derive(Clone, Deserialize)]
 pub struct GitHubNotifyConfig {
@@ -182,10 +182,12 @@ pub fn update_commit_status(
     }
 }
 
-pub fn github_watcher(notify_config: GitHubNotifyConfig) -> impl Fn(ActionOutput) -> Result<(), GitOpsError> + Send + 'static {
+pub fn github_watcher(
+    notify_config: GitHubNotifyConfig,
+) -> impl Fn(WorkloadEvent) -> Result<(), GitOpsError> + Send + 'static {
     move |event| {
         match event {
-            ActionOutput::Changes(name, prev_sha, new_sha) => {
+            WorkloadEvent::Changes(name, prev_sha, new_sha) => {
                 update_commit_status(
                     &notify_config,
                     &new_sha,
@@ -193,7 +195,7 @@ pub fn github_watcher(notify_config: GitHubNotifyConfig) -> impl Fn(ActionOutput
                     &format!("running {} [last success {}]", name, prev_sha),
                 )?;
             }
-            ActionOutput::Success(name, new_sha) => {
+            WorkloadEvent::Success(name, new_sha) => {
                 update_commit_status(
                     &notify_config,
                     &new_sha,
@@ -201,7 +203,7 @@ pub fn github_watcher(notify_config: GitHubNotifyConfig) -> impl Fn(ActionOutput
                     &format!("{} succeeded", name),
                 )?;
             }
-            ActionOutput::Failure(task, action, new_sha) => {
+            WorkloadEvent::Failure(task, action, new_sha) => {
                 update_commit_status(
                     &notify_config,
                     &new_sha,
@@ -209,7 +211,7 @@ pub fn github_watcher(notify_config: GitHubNotifyConfig) -> impl Fn(ActionOutput
                     &format!("{} failed on action {}", task, action),
                 )?;
             }
-            ActionOutput::Error(task, action, new_sha) => {
+            WorkloadEvent::Error(task, action, new_sha) => {
                 update_commit_status(
                     &notify_config,
                     &new_sha,

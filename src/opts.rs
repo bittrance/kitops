@@ -8,10 +8,7 @@ use crate::{
     receiver::logging_receiver,
     store::{FileStore, Store},
     task::{
-        github::github_watcher,
-        gixworkload::GitWorkload,
-        scheduled::ScheduledTask,
-        GitTaskConfig,
+        github::github_watcher, gixworkload::GitWorkload, scheduled::ScheduledTask, GitTaskConfig,
     },
 };
 
