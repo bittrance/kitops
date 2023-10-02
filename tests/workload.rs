@@ -5,7 +5,7 @@ use gix::{hash::Kind, ObjectId};
 use kitops::{
     errors::GitOpsError,
     opts::CliOptions,
-    receiver::WorkloadEvent,
+    receiver::{SourceType, WorkloadEvent},
     task::{gixworkload::GitWorkload, GitTaskConfig, Workload},
 };
 use utils::*;
@@ -16,7 +16,7 @@ fn cli_options(repodir: &tempfile::TempDir) -> CliOptions {
     CliOptions::parse_from(&["kitops", "--repo-dir", &repodir.path().to_str().unwrap()])
 }
 
-fn config(upstream: &tempfile::TempDir, entrypoint: &str) -> GitTaskConfig {
+fn config(upstream: &tempfile::TempDir, entrypoint: &str, args: &[&str]) -> GitTaskConfig {
     serde_yaml::from_str(&format!(
         r#"
 name: ze-task
@@ -25,9 +25,11 @@ git:
 actions:
     - name: ze-action
       entrypoint: {}
+      args: {}
 "#,
         upstream.path().to_str().unwrap(),
-        entrypoint
+        entrypoint,
+        serde_json::to_string(args).unwrap()
     ))
     .unwrap()
 }
@@ -57,7 +59,7 @@ fn watch_successful_workload() {
     let next_sha = ObjectId::from_hex(next_sha.as_bytes()).unwrap();
     let workdir = tempfile::tempdir().unwrap();
     let opts = cli_options(&repodir);
-    let config = config(&upstream, "/bin/ls");
+    let config = config(&upstream, "/bin/ls", &[]);
     let mut workload = GitWorkload::from_config(config, &opts);
     let events = Arc::new(Mutex::new(Vec::new()));
     let events2 = events.clone();
@@ -85,7 +87,7 @@ fn watch_failing_workload() {
     let repodir = tempfile::tempdir().unwrap();
     let workdir = tempfile::tempdir().unwrap();
     let opts = cli_options(&repodir);
-    let config = config(&upstream, "/usr/bin/false");
+    let config = config(&upstream, "/usr/bin/false", &[]);
     let mut workload = GitWorkload::from_config(config, &opts);
     let events = Arc::new(Mutex::new(Vec::new()));
     let events2 = events.clone();
@@ -110,7 +112,7 @@ fn watch_erroring_workload() {
     let repodir = tempfile::tempdir().unwrap();
     let workdir = tempfile::tempdir().unwrap();
     let opts = cli_options(&repodir);
-    let config = config(&upstream, "/no/such/file");
+    let config = config(&upstream, "/no/such/file", &[]);
     let mut workload = GitWorkload::from_config(config, &opts);
     let events = Arc::new(Mutex::new(Vec::new()));
     let events2 = events.clone();
@@ -125,4 +127,38 @@ fn watch_erroring_workload() {
     assert_eq!(events.len(), 2);
     assert!(matches!(events[0], WorkloadEvent::Changes(..)));
     assert!(matches!(events[1], WorkloadEvent::Error(..)));
+}
+
+#[cfg(unix)]
+#[test]
+fn woarkload_gets_sha_env() {
+    let sh = shell();
+    let upstream = empty_repo(&sh);
+    let next_sha = commit_file(&upstream, "revision 1");
+    let repodir = tempfile::tempdir().unwrap();
+    let next_sha = ObjectId::from_hex(next_sha.as_bytes()).unwrap();
+    let workdir = tempfile::tempdir().unwrap();
+    let opts = cli_options(&repodir);
+    let config = config(&upstream, "/bin/sh", &["-c", "echo $KITOPS_SHA"]);
+    let mut workload = GitWorkload::from_config(config, &opts);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events2 = events.clone();
+    workload.watch(move |event| {
+        events2.lock().unwrap().push(event);
+        Ok(())
+    });
+    let prev_sha = ObjectId::empty_tree(Kind::Sha1);
+    workload.perform(workdir.into_path(), prev_sha).unwrap();
+    assert_eq!(
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|e| matches!(e, WorkloadEvent::ActionOutput(..))),
+        Some(&WorkloadEvent::ActionOutput(
+            "ze-task|ze-action".to_string(),
+            SourceType::StdOut,
+            format!("{}\n", next_sha).into_bytes(),
+        ))
+    );
 }

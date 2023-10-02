@@ -39,6 +39,10 @@ impl Action {
     pub fn id(&self) -> String {
         self.name.clone()
     }
+
+    pub fn set_env(&mut self, key: String, val: String) {
+        self.environment.insert(key, val);
+    }
 }
 
 impl TryFrom<&CliOptions> for Action {

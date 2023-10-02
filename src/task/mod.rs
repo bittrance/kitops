@@ -15,7 +15,7 @@ pub mod scheduled;
 pub trait Workload {
     fn id(&self) -> String;
     fn interval(&self) -> Duration;
-    fn perform(&self, workdir: PathBuf, current_sha: ObjectId) -> Result<ObjectId, GitOpsError>;
+    fn perform(self, workdir: PathBuf, current_sha: ObjectId) -> Result<ObjectId, GitOpsError>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

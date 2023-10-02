@@ -72,7 +72,7 @@ impl Workload for GitWorkload {
         self.config.interval
     }
 
-    fn perform(&self, workdir: PathBuf, current_sha: ObjectId) -> Result<ObjectId, GitOpsError> {
+    fn perform(mut self, workdir: PathBuf, current_sha: ObjectId) -> Result<ObjectId, GitOpsError> {
         let deadline = Instant::now() + self.config.timeout;
         let watchers = self.watchers.clone();
         let sink = Arc::new(Mutex::new(move |event: WorkloadEvent| {
@@ -81,9 +81,15 @@ impl Workload for GitWorkload {
             }
             Ok::<_, GitOpsError>(())
         }));
-
         let new_sha = ensure_worktree(&self.config.git, deadline, &self.repo_dir, &workdir)?;
         if current_sha != new_sha {
+            self.config.actions.iter_mut().for_each(|action| {
+                action.set_env(
+                    "KITOPS_LAST_SUCCESSFUL_SHA".to_string(),
+                    current_sha.to_string(),
+                );
+                action.set_env("KITOPS_SHA".to_string(), new_sha.to_string());
+            });
             sink.lock().unwrap()(WorkloadEvent::Changes(
                 self.config.name.clone(),
                 current_sha,

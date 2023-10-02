@@ -40,7 +40,7 @@ impl Workload for TestWorkload {
         Duration::from_secs(1)
     }
 
-    fn perform(&self, _workdir: PathBuf, _current_sha: ObjectId) -> Result<ObjectId, GitOpsError> {
+    fn perform(self, _workdir: PathBuf, _current_sha: ObjectId) -> Result<ObjectId, GitOpsError> {
         self.status
             .store(true, std::sync::atomic::Ordering::Relaxed);
         sleep(Duration::from_millis(10));
