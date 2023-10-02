@@ -16,7 +16,7 @@ The plan forward, roughly in falling priority:
 - [x] proper options validation (e.g. config-file xor url/action)
 - [x] specialized notification action to update github status
 - [x] new git sha and branch name in action env vars
-- [ ] changed task config should override state loaded from disk
+- [x] changed task config should override state loaded from disk
 - [ ] docker packaging
 - [ ] readme with design and deployment options
 - [ ] intelligent gitconfig handling

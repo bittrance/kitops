@@ -72,6 +72,11 @@ impl<W: Workload + Clone + Send + 'static> ScheduledTask<W> {
 
     pub fn set_state(&mut self, state: State) {
         self.state = state;
+        // If configuration has changed, this will move up the next run
+        self.state.next_run = std::cmp::min(
+            self.state.next_run,
+            SystemTime::now().add(self.work.interval()),
+        );
     }
 }
 
@@ -118,5 +123,22 @@ mod tests {
         assert!(!task.is_eligible());
         sleep(Duration::from_millis(10));
         assert!(task.is_eligible());
+    }
+
+    #[test]
+    fn set_state_picks_earliest_next_run() {
+        let stored_next_run = SystemTime::now();
+        let mut task = ScheduledTask::new(TestWorkload::default());
+        task.set_state(State {
+            current_sha: ObjectId::null(gix::hash::Kind::Sha1),
+            next_run: stored_next_run,
+        });
+        assert!(task.state().next_run == stored_next_run);
+        let stored_next_run = SystemTime::now() + Duration::from_secs(10);
+        task.set_state(State {
+            current_sha: ObjectId::null(gix::hash::Kind::Sha1),
+            next_run: stored_next_run,
+        });
+        assert!(task.state().next_run < stored_next_run);
     }
 }
