@@ -4,9 +4,9 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 #[cfg(test)]
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
+pub const POLL_INTERVAL: Duration = Duration::from_millis(10);
 #[cfg(not(test))]
-const POLL_INTERVAL: Duration = Duration::from_millis(500);
+pub const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 pub struct Watchdog {
     deadline: Instant,

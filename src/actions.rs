@@ -5,7 +5,7 @@ use std::{
     process::{Command, Stdio},
     sync::{Arc, Mutex},
     thread::{sleep, spawn, JoinHandle},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use serde::Deserialize;
@@ -14,6 +14,7 @@ use crate::{
     errors::GitOpsError,
     opts::CliOptions,
     receiver::{SourceType, WorkloadEvent},
+    utils::POLL_INTERVAL,
 };
 
 #[derive(Debug, PartialEq)]
@@ -140,7 +141,7 @@ where
             sink.lock().unwrap()(WorkloadEvent::Timeout(name.to_string()))?;
             break Ok(ActionResult::Failure);
         }
-        sleep(Duration::from_secs(1));
+        sleep(POLL_INTERVAL);
     }
 }
 
@@ -149,6 +150,7 @@ mod tests {
     use std::{
         process::ExitStatus,
         sync::{Arc, Mutex},
+        time::Duration,
     };
 
     use super::*;
