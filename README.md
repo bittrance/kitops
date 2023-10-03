@@ -17,7 +17,7 @@ The plan forward, roughly in falling priority:
 - [x] specialized notification action to update github status
 - [x] new git sha and branch name in action env vars
 - [x] changed task config should override state loaded from disk
-- [ ] docker packaging
+- [x] docker packaging
 - [ ] readme with design and deployment options
 - [ ] intelligent gitconfig handling
 - [ ] allow git commands in workdir (but note that this means two tasks can no longer point to the same repo without additional changeas)
