@@ -76,6 +76,7 @@ mod lib {
     use gix::{hash::Kind, ObjectId};
 
     use crate::{
+        errors::GitOpsError,
         task::{scheduled::ScheduledTask, State},
         testutils::TestWorkload,
     };
@@ -105,5 +106,17 @@ mod lib {
         let mut persist = |_t: &ScheduledTask<TestWorkload>| Ok(());
         let progress = super::progress_one_task(&mut tasks[..], &mut persist).unwrap();
         assert!(progress == super::Progress::Idle);
+    }
+
+    #[test]
+    fn dont_pesist_failing_task() {
+        let mut tasks = vec![ScheduledTask::new(TestWorkload::fail_with(|| {
+            GitOpsError::ActionFailed("ze-task".to_owned(), "ze-action".to_owned())
+        }))];
+        let mut persist = |_t: &ScheduledTask<TestWorkload>| Ok(());
+        super::progress_one_task(&mut tasks[..], &mut persist).unwrap();
+        tasks[0].await_finished();
+        super::progress_one_task(&mut tasks[..], &mut persist).unwrap();
+        assert_eq!(tasks[0].state().current_sha, ObjectId::null(Kind::Sha1));
     }
 }

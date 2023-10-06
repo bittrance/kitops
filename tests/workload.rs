@@ -96,7 +96,8 @@ fn watch_failing_workload() {
         Ok(())
     });
     let prev_sha = ObjectId::empty_tree(Kind::Sha1);
-    workload.perform(workdir.into_path(), prev_sha).unwrap();
+    let res = workload.perform(workdir.into_path(), prev_sha);
+    assert!(matches!(res, Err(GitOpsError::ActionFailed(..))));
     let events = non_action_events(events);
     assert_eq!(events.len(), 2);
     assert!(matches!(events[0], WorkloadEvent::Changes(..)));

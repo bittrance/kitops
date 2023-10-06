@@ -22,6 +22,7 @@ The plan forward, roughly in falling priority:
 - [ ] intelligent gitconfig handling
 - [ ] allow git commands in workdir (but note that this means two tasks can no longer point to the same repo without additional changeas)
 - [ ] useful logging (log level, json)
+- [ ] lock state so that many kitops instances can collaborate
 - [ ] support Amazon S3 as state store
 - [ ] support Azure Blob storage as state store
 - [ ] GitHub app for checking out private repo

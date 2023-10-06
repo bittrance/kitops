@@ -38,6 +38,8 @@ pub enum GitOpsError {
     FetchError(Box<dyn std::error::Error + Send + Sync>),
     #[error("Failed to open repository: {0}")]
     OpenRepo(gix::open::Error),
+    #[error("Action failed: {1} in {0}")]
+    ActionFailed(String, String),
     #[error("Failed to send event: {0}")]
     NotifyError(String),
     #[error("Failed to launch action: {0}")]
@@ -57,7 +59,10 @@ pub enum GitOpsError {
 impl GitOpsError {
     #[allow(clippy::unused_self)]
     pub fn is_fatal(&self) -> bool {
-        // TODO Some errors should be recovered
-        true
+        #[allow(clippy::match_like_matches_macro)]
+        match self {
+            Self::ActionFailed(..) => false,
+            _ => true,
+        }
     }
 }

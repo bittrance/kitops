@@ -1,9 +1,4 @@
-use std::{
-    path::PathBuf,
-    sync::{atomic::AtomicBool, Arc},
-    thread::sleep,
-    time::Duration,
-};
+use std::{path::PathBuf, sync::Arc, thread::sleep, time::Duration};
 
 use gix::ObjectId;
 
@@ -28,7 +23,16 @@ impl<W: Workload + Clone + Send + 'static> ScheduledTask<W> {
 
 #[derive(Clone, Default)]
 pub struct TestWorkload {
-    pub status: Arc<AtomicBool>,
+    errfunc: Option<Arc<Box<dyn Fn() -> GitOpsError + Send + Sync>>>,
+}
+
+impl TestWorkload {
+    pub fn fail_with(errfunc: impl Fn() -> GitOpsError + Send + Sync + 'static) -> Self {
+        Self {
+            errfunc: Some(Arc::new(Box::new(errfunc))),
+            ..Default::default()
+        }
+    }
 }
 
 impl Workload for TestWorkload {
@@ -41,9 +45,10 @@ impl Workload for TestWorkload {
     }
 
     fn perform(self, _workdir: PathBuf, _current_sha: ObjectId) -> Result<ObjectId, GitOpsError> {
-        self.status
-            .store(true, std::sync::atomic::Ordering::Relaxed);
         sleep(Duration::from_millis(10));
+        if self.errfunc.is_some() {
+            return Err(self.errfunc.unwrap()());
+        }
         Ok(ObjectId::empty_blob(gix::hash::Kind::Sha1))
     }
 }

@@ -96,6 +96,7 @@ impl Workload for GitWorkload {
                 new_sha,
             ))
             .map_err(|err| GitOpsError::NotifyError(format!("{}", err)))?;
+            // TODO The returns dodge cleanup
             match self.run_actions(&workdir, deadline, &sink) {
                 Ok(None) => {
                     sink.lock().unwrap()(WorkloadEvent::Success(self.config.name.clone(), new_sha))
@@ -104,10 +105,14 @@ impl Workload for GitWorkload {
                 Ok(Some(action_name)) => {
                     sink.lock().unwrap()(WorkloadEvent::Failure(
                         self.config.name.clone(),
-                        action_name,
+                        action_name.clone(),
                         new_sha,
                     ))
                     .map_err(|err| GitOpsError::NotifyError(format!("{}", err)))?;
+                    return Err(GitOpsError::ActionFailed(
+                        self.config.name.clone(),
+                        action_name,
+                    ));
                 }
                 Err(err) => {
                     sink.lock().unwrap()(WorkloadEvent::Error(
