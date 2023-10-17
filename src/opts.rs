@@ -8,7 +8,10 @@ use crate::{
     receiver::logging_receiver,
     store::{FileStore, Store},
     task::{
-        github::github_watcher, gixworkload::GitWorkload, scheduled::ScheduledTask, GitTaskConfig,
+        github::{github_watcher, GithubUrlProvider},
+        gixworkload::GitWorkload,
+        scheduled::ScheduledTask,
+        GitTaskConfig,
     },
 };
 
@@ -97,10 +100,14 @@ struct ConfigFile {
 }
 
 fn into_task(mut config: GitTaskConfig, opts: &CliOptions) -> ScheduledTask<GitWorkload> {
-    let notify_config = config.notify.take();
+    let github = config.github.take();
+    if let Some(ref github) = github {
+        config
+            .upgrade_url_provider(|current| GithubUrlProvider::new(current.url().clone(), github));
+    }
     let mut work = GitWorkload::from_config(config, opts);
-    if let Some(notify_config) = notify_config {
-        work.watch(github_watcher(notify_config));
+    if let Some(ref github) = github {
+        work.watch(github_watcher(github.clone()));
     }
     let (tx, rx) = channel();
     work.watch(move |event| {

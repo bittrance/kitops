@@ -30,7 +30,7 @@ impl GitWorkload {
         let repo_dir = opts
             .repo_dir
             .as_ref()
-            .map(|dir| dir.join(config.git.safe_url()))
+            .map(|dir| dir.join(config.git.url.safe_url()))
             .unwrap();
         GitWorkload {
             config,
