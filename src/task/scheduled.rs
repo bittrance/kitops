@@ -61,7 +61,7 @@ impl<W: Workload + Clone + Send + 'static> ScheduledTask<W> {
             .take()
             .expect("result only called once")
             .join()
-            .unwrap()?;
+            .expect("thread not to panic")?;
         self.state.current_sha = new_sha;
         Ok(())
     }
@@ -111,6 +111,16 @@ mod tests {
         assert!(!task.is_finished());
         assert!(task.state().current_sha.is_empty_blob());
         task.await_eligible();
+    }
+
+    #[test]
+    #[should_panic]
+    fn scheduled_task_on_panic() {
+        let mut task = ScheduledTask::new(TestWorkload::fail_with(|| panic!("BOOM!")));
+        task.start().unwrap();
+        task.await_finished();
+        assert!(!task.is_running());
+        task.finalize().unwrap();
     }
 
     #[test]
