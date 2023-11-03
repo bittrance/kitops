@@ -40,16 +40,13 @@ pub struct CliOptions {
     /// Environment variable for action
     #[clap(long)]
     pub environment: Vec<String>,
-    /// GitHub App ID
+    /// GitHub App ID for authentication with private repos and commit status updates
     #[clap(long)]
     pub github_app_id: Option<String>,
     /// GitHub App private key file
     #[clap(long)]
     pub github_private_key_file: Option<PathBuf>,
-    /// Update GitHub commit status on this repo
-    #[clap(long)]
-    pub github_repo_slug: Option<String>,
-    /// Use this context when updating GitHub commit status
+    /// Turn on updating GitHub commit status with this context (requires auth flags)
     #[clap(long)]
     pub github_context: Option<String>,
     /// Check repo for changes at this interval (e.g. 1h, 30m, 10s)
@@ -101,13 +98,17 @@ struct ConfigFile {
 
 fn into_task(mut config: GitTaskConfig, opts: &CliOptions) -> ScheduledTask<GitWorkload> {
     let github = config.github.take();
+    let mut slug = None; // TODO Yuck!
     if let Some(ref github) = github {
-        config
-            .upgrade_url_provider(|current| GithubUrlProvider::new(current.url().clone(), github));
+        let provider = GithubUrlProvider::new(config.git.url.url().clone(), github);
+        slug = Some(provider.repo_slug());
+        config.upgrade_url_provider(|_| provider);
     }
     let mut work = GitWorkload::from_config(config, opts);
-    if let Some(ref github) = github {
-        work.watch(github_watcher(github.clone()));
+    if let Some(github) = github {
+        if github.notify_context.is_some() {
+            work.watch(github_watcher(slug.unwrap(), github));
+        }
     }
     let (tx, rx) = channel();
     work.watch(move |event| {

@@ -20,9 +20,8 @@ use crate::{errors::GitOpsError, git::UrlProvider, opts::CliOptions, receiver::W
 pub struct GithubConfig {
     app_id: String,
     private_key_file: PathBuf,
-    notify_slug: Option<String>,
     #[serde(default = "GithubConfig::default_context")]
-    notify_context: Option<String>,
+    pub notify_context: Option<String>,
 }
 
 impl GithubConfig {
@@ -40,7 +39,6 @@ impl TryFrom<&CliOptions> for Option<GithubConfig> {
             (Some(app_id), Some(private_key_file)) => Ok(Some(GithubConfig {
                 app_id: app_id.clone(),
                 private_key_file: private_key_file.clone(),
-                notify_slug: opts.github_repo_slug.clone(),
                 notify_context: opts.github_context.clone(),
             })),
             _ => Err(GitOpsError::InvalidNotifyConfig),
@@ -63,6 +61,10 @@ impl GithubUrlProvider {
             private_key_file: config.private_key_file.clone(),
         }
     }
+
+    pub fn repo_slug(&self) -> String {
+        self.url.path.to_string().replace(".git", "")[1..].to_owned()
+    }
 }
 
 impl UrlProvider for GithubUrlProvider {
@@ -71,10 +73,9 @@ impl UrlProvider for GithubUrlProvider {
     }
 
     fn auth_url(&self) -> Result<Url, GitOpsError> {
-        let repo_slug = self.url.path.to_string().replace(".git", "")[1..].to_owned();
         let client = http_client();
         let jwt_token = generate_jwt(&self.app_id, &self.private_key_file)?;
-        let installation_id = get_installation_id(&repo_slug, &client, &jwt_token)?;
+        let installation_id = get_installation_id(&self.repo_slug(), &client, &jwt_token)?;
         let access_token = get_access_token(installation_id, &client, &jwt_token)?;
         // TODO Newer version of gix-url has set_username/set_password
         Ok(Url::from_parts(
@@ -183,6 +184,7 @@ fn get_access_token(
 }
 
 pub fn update_commit_status(
+    repo_slug: &str,
     config: &GithubConfig,
     sha: &ObjectId,
     status: GitHubStatus,
@@ -191,14 +193,12 @@ pub fn update_commit_status(
     let config = config.clone();
     let client = http_client();
     let jwt_token = generate_jwt(&config.app_id, &config.private_key_file)?;
-    let installation_id =
-        get_installation_id(config.notify_slug.as_ref().unwrap(), &client, &jwt_token)?;
+    let installation_id = get_installation_id(repo_slug, &client, &jwt_token)?;
     let access_token = get_access_token(installation_id, &client, &jwt_token)?;
 
     let url = format!(
         "https://api.github.com/repos/{}/statuses/{}",
-        config.notify_slug.unwrap(),
-        sha
+        repo_slug, sha
     );
     let body = serde_json::json!({
         "state": status,
@@ -225,12 +225,14 @@ pub fn update_commit_status(
 }
 
 pub fn github_watcher(
+    repo_slug: String,
     config: GithubConfig,
 ) -> impl Fn(WorkloadEvent) -> Result<(), GitOpsError> + Send + 'static {
     move |event| {
         match event {
             WorkloadEvent::Changes(name, prev_sha, new_sha) => {
                 update_commit_status(
+                    &repo_slug,
                     &config,
                     &new_sha,
                     GitHubStatus::Pending,
@@ -239,6 +241,7 @@ pub fn github_watcher(
             }
             WorkloadEvent::Success(name, new_sha) => {
                 update_commit_status(
+                    &repo_slug,
                     &config,
                     &new_sha,
                     GitHubStatus::Success,
@@ -247,6 +250,7 @@ pub fn github_watcher(
             }
             WorkloadEvent::Failure(task, action, new_sha) => {
                 update_commit_status(
+                    &repo_slug,
                     &config,
                     &new_sha,
                     GitHubStatus::Failure,
@@ -255,6 +259,7 @@ pub fn github_watcher(
             }
             WorkloadEvent::Error(task, action, new_sha) => {
                 update_commit_status(
+                    &repo_slug,
                     &config,
                     &new_sha,
                     GitHubStatus::Error,

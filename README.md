@@ -25,4 +25,4 @@ The plan forward, roughly in falling priority:
 - [ ] lock state so that many kitops instances can collaborate
 - [ ] support Amazon S3 as state store
 - [ ] support Azure Blob storage as state store
-- [ ] GitHub app for checking out private repo
+- [x] GitHub app for checking out private repo

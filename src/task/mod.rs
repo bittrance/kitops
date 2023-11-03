@@ -51,7 +51,7 @@ where
 pub struct GitTaskConfig {
     name: String,
     pub github: Option<github::GithubConfig>,
-    git: GitConfig,
+    pub git: GitConfig,
     actions: Vec<Action>,
     #[serde(
         default = "GitTaskConfig::default_interval",
