@@ -21,7 +21,7 @@ pub struct GithubConfig {
     app_id: String,
     private_key_file: PathBuf,
     #[serde(default = "GithubConfig::default_context")]
-    pub notify_context: Option<String>,
+    pub status_context: Option<String>,
 }
 
 impl GithubConfig {
@@ -39,7 +39,7 @@ impl TryFrom<&CliOptions> for Option<GithubConfig> {
             (Some(app_id), Some(private_key_file)) => Ok(Some(GithubConfig {
                 app_id: app_id.clone(),
                 private_key_file: private_key_file.clone(),
-                notify_context: opts.github_context.clone(),
+                status_context: opts.github_status_context.clone(),
             })),
             _ => Err(GitOpsError::InvalidNotifyConfig),
         }
@@ -202,7 +202,7 @@ pub fn update_commit_status(
     );
     let body = serde_json::json!({
         "state": status,
-        "context": config.notify_context.unwrap(),
+        "context": config.status_context.unwrap(),
         "description": message,
     });
     let res = client

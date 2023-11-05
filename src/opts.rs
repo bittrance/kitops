@@ -46,9 +46,9 @@ pub struct CliOptions {
     /// GitHub App private key file
     #[clap(long)]
     pub github_private_key_file: Option<PathBuf>,
-    /// Turn on updating GitHub commit status with this context (requires auth flags)
+    /// Turn on updating GitHub commit status updates with this context (requires auth flags)
     #[clap(long)]
-    pub github_context: Option<String>,
+    pub github_status_context: Option<String>,
     /// Check repo for changes at this interval (e.g. 1h, 30m, 10s)
     #[arg(long, value_parser = humantime::parse_duration)]
     pub interval: Option<Duration>,
@@ -106,7 +106,7 @@ fn into_task(mut config: GitTaskConfig, opts: &CliOptions) -> ScheduledTask<GitW
     }
     let mut work = GitWorkload::from_config(config, opts);
     if let Some(github) = github {
-        if github.notify_context.is_some() {
+        if github.status_context.is_some() {
             work.watch(github_watcher(slug.unwrap(), github));
         }
     }
