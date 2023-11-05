@@ -142,14 +142,14 @@ fn checkout_worktree(
         .unwrap();
     let (mut state, _) = repo.index_from_tree(&tree_id).unwrap().into_parts();
     let odb = repo.objects.clone().into_arc().unwrap();
-    let _outcome = gix::worktree::checkout(
+    let _outcome = gix::worktree::state::checkout(
         &mut state,
         workdir,
         move |oid, buf| odb.find_blob(oid, buf),
-        &mut Discard,
-        &mut Discard,
+        &Discard,
+        &Discard,
         &AtomicBool::default(),
-        gix::worktree::checkout::Options::default(),
+        gix::worktree::state::checkout::Options::default(),
     )
     .unwrap();
     Ok(oid)

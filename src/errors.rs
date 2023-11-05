@@ -1,4 +1,4 @@
-use std::{path::PathBuf, fmt::Debug};
+use std::{fmt::Debug, path::PathBuf};
 
 use thiserror::Error;
 

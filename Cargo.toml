@@ -9,7 +9,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.1.4", features = ["derive"] }
-gix = { version = "0.51.0", features = ["default", "blocking-network-client", "blocking-http-transport-reqwest-native-tls", "serde"] }
+gix = { version = "0.55.2", features = ["default", "blocking-network-client", "blocking-http-transport-reqwest-native-tls", "serde"] }
 humantime = "2.1.0"
 jwt-simple = "0.11.7"
 reqwest = { version = "0.11.20", default-features = false, features = ["blocking", "default-tls", "serde_json", "gzip", "deflate", "json"] }
