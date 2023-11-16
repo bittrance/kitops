@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     path::Path,
     sync::{atomic::AtomicBool, Arc},
     thread::scope,
@@ -8,7 +9,9 @@ use std::{
 use gix::{
     bstr::{BString, ByteSlice},
     config::tree::User,
-    prelude::FindExt,
+    objs::Data,
+    odb::{store::Handle, Cache, Store},
+    oid,
     progress::Discard,
     refs::{
         transaction::{Change, LogChange, RefEdit},
@@ -151,6 +154,41 @@ fn fetch_repo(repo: &Repository, config: &GitConfig, deadline: Instant) -> Resul
     Ok(())
 }
 
+#[derive(Clone)]
+struct MaybeFind<Allow: Clone, Find: Clone> {
+    allow: std::cell::RefCell<Allow>,
+    objects: Find,
+}
+
+impl<Allow, Find> gix::prelude::Find for MaybeFind<Allow, Find>
+where
+    Allow: FnMut(&oid) -> bool + Send + Clone,
+    Find: gix::prelude::Find + Send + Clone,
+{
+    fn try_find<'a>(
+        &self,
+        id: &oid,
+        buf: &'a mut Vec<u8>,
+    ) -> Result<Option<Data<'a>>, Box<dyn std::error::Error + Send + Sync>> {
+        if (self.allow.borrow_mut())(id) {
+            self.objects.try_find(id, buf)
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+fn can_we_please_have_impl_in_type_alias_already() -> impl FnMut(&oid) -> bool + Send + Clone {
+    |_| true
+}
+
+fn make_finder(odb: Cache<Handle<Arc<Store>>>) -> impl gix::prelude::Find + Send + Clone {
+    MaybeFind {
+        allow: RefCell::new(can_we_please_have_impl_in_type_alias_already()),
+        objects: odb,
+    }
+}
+
 fn checkout_worktree(
     repo: &Repository,
     branch: &str,
@@ -171,10 +209,11 @@ fn checkout_worktree(
         .unwrap();
     let (mut state, _) = repo.index_from_tree(&tree_id).unwrap().into_parts();
     let odb = repo.objects.clone().into_arc().unwrap();
+    let db = make_finder(odb);
     let _outcome = gix::worktree::state::checkout(
         &mut state,
         workdir,
-        move |oid, buf| odb.find_blob(oid, buf),
+        db,
         &Discard,
         &Discard,
         &AtomicBool::default(),
