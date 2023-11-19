@@ -14,7 +14,11 @@ use crate::{
     receiver::WorkloadEvent,
 };
 
-use super::Workload;
+pub trait Workload {
+    fn id(&self) -> String;
+    fn interval(&self) -> Duration;
+    fn perform(self, workdir: PathBuf, current_sha: ObjectId) -> Result<ObjectId, GitOpsError>;
+}
 
 #[allow(clippy::type_complexity)]
 #[derive(Clone)]

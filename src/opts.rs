@@ -5,14 +5,12 @@ use clap::Parser;
 use crate::{
     config::{read_config, GitTaskConfig},
     errors::GitOpsError,
+    github::{github_watcher, GithubUrlProvider},
     gix::DefaultUrlProvider,
     receiver::logging_receiver,
     store::{FileStore, Store},
-    task::{
-        github::{github_watcher, GithubUrlProvider},
-        gitworkload::GitWorkload,
-        scheduled::ScheduledTask,
-    },
+    task::ScheduledTask,
+    workload::GitWorkload,
 };
 
 const DEFAULT_BRANCH: &str = "main";

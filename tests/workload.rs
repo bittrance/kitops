@@ -6,7 +6,7 @@ use kitops::{
     errors::GitOpsError,
     gix::DefaultUrlProvider,
     receiver::{SourceType, WorkloadEvent},
-    task::{gitworkload::GitWorkload, Workload},
+    workload::{GitWorkload, Workload},
 };
 use utils::*;
 

@@ -1,22 +1,7 @@
-use std::{
-    path::PathBuf,
-    time::{Duration, SystemTime},
-};
+use std::time::SystemTime;
 
 use gix::{hash::Kind, ObjectId};
 use serde::{Deserialize, Serialize};
-
-use crate::errors::GitOpsError;
-
-pub mod github;
-pub mod gitworkload;
-pub mod scheduled;
-
-pub trait Workload {
-    fn id(&self) -> String;
-    fn interval(&self) -> Duration;
-    fn perform(self, workdir: PathBuf, current_sha: ObjectId) -> Result<ObjectId, GitOpsError>;
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct State {

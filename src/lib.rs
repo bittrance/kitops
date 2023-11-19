@@ -1,18 +1,21 @@
 use std::{thread::sleep, time::Duration};
 
-use task::{scheduled::ScheduledTask, Workload};
+use crate::{task::ScheduledTask, workload::Workload};
 
 pub mod actions;
 pub mod config;
 pub mod errors;
+pub mod github;
 pub mod gix;
 pub mod opts;
 pub mod receiver;
+pub mod state;
 pub mod store;
 pub mod task;
 #[cfg(test)]
 pub(crate) mod testutils;
 pub(crate) mod utils;
+pub mod workload;
 
 #[derive(Debug, PartialEq)]
 pub enum Progress {
@@ -76,11 +79,7 @@ mod lib {
 
     use gix::{hash::Kind, ObjectId};
 
-    use crate::{
-        errors::GitOpsError,
-        task::{scheduled::ScheduledTask, State},
-        testutils::TestWorkload,
-    };
+    use crate::{errors::GitOpsError, state::State, task::ScheduledTask, testutils::TestWorkload};
 
     #[test]
     fn run_eligible_task() {

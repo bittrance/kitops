@@ -2,10 +2,7 @@ use std::{path::PathBuf, sync::Arc, thread::sleep, time::Duration};
 
 use gix::ObjectId;
 
-use crate::{
-    errors::GitOpsError,
-    task::{scheduled::ScheduledTask, Workload},
-};
+use crate::{errors::GitOpsError, task::ScheduledTask, workload::Workload};
 
 impl<W: Workload + Clone + Send + 'static> ScheduledTask<W> {
     pub fn await_finished(&self) {

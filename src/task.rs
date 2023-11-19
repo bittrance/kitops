@@ -6,9 +6,7 @@ use std::{
 
 use gix::ObjectId;
 
-use crate::errors::GitOpsError;
-
-use super::{State, Workload};
+use crate::{errors::GitOpsError, state::State, workload::Workload};
 
 pub struct ScheduledTask<W: Workload + Clone + Send> {
     work: W,
@@ -89,10 +87,7 @@ mod tests {
 
     use gix::ObjectId;
 
-    use crate::{
-        task::{scheduled::ScheduledTask, State},
-        testutils::TestWorkload,
-    };
+    use crate::{state::State, task::ScheduledTask, testutils::TestWorkload};
 
     #[test]
     fn scheduled_task_flow() {
