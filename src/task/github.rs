@@ -11,40 +11,10 @@ use reqwest::{
     blocking::ClientBuilder,
     header::{ACCEPT, AUTHORIZATION, USER_AGENT},
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 
-use crate::{errors::GitOpsError, git::UrlProvider, opts::CliOptions, receiver::WorkloadEvent};
-
-#[derive(Clone, Deserialize)]
-pub struct GithubConfig {
-    app_id: String,
-    private_key_file: PathBuf,
-    #[serde(default = "GithubConfig::default_context")]
-    pub status_context: Option<String>,
-}
-
-impl GithubConfig {
-    pub fn default_context() -> Option<String> {
-        Some("kitops".to_owned())
-    }
-}
-
-impl TryFrom<&CliOptions> for Option<GithubConfig> {
-    type Error = GitOpsError;
-
-    fn try_from(opts: &CliOptions) -> Result<Self, Self::Error> {
-        match (&opts.github_app_id, &opts.github_private_key_file) {
-            (None, None) => Ok(None),
-            (Some(app_id), Some(private_key_file)) => Ok(Some(GithubConfig {
-                app_id: app_id.clone(),
-                private_key_file: private_key_file.clone(),
-                status_context: opts.github_status_context.clone(),
-            })),
-            _ => Err(GitOpsError::InvalidNotifyConfig),
-        }
-    }
-}
+use crate::{config::GithubConfig, errors::GitOpsError, gix::UrlProvider, receiver::WorkloadEvent};
 
 #[derive(Clone)]
 pub struct GithubUrlProvider {

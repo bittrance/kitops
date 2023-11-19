@@ -5,7 +5,7 @@ use kitops::errors::GitOpsError;
 use kitops::opts::{load_store, load_tasks, CliOptions};
 use kitops::run_tasks;
 use kitops::store::Store;
-use kitops::task::gixworkload::GitWorkload;
+use kitops::task::gitworkload::GitWorkload;
 use kitops::task::scheduled::ScheduledTask;
 use std::collections::HashSet;
 use std::time::Duration;

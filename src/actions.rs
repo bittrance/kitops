@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     io::Read,
     path::Path,
     process::{Command, Stdio},
@@ -8,11 +7,9 @@ use std::{
     time::Instant,
 };
 
-use serde::Deserialize;
-
 use crate::{
+    config::ActionConfig,
     errors::GitOpsError,
-    opts::CliOptions,
     receiver::{SourceType, WorkloadEvent},
     utils::POLL_INTERVAL,
 };
@@ -23,60 +20,35 @@ pub enum ActionResult {
     Failure,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone)]
 pub struct Action {
-    name: String,
-    entrypoint: String,
-    #[serde(default)]
-    args: Vec<String>,
-    #[serde(default)]
-    environment: HashMap<String, String>,
-    #[serde(default)]
-    inherit_environment: bool,
+    config: ActionConfig,
 }
 
 impl Action {
+    pub fn new(config: ActionConfig) -> Self {
+        Action { config }
+    }
+
     pub fn id(&self) -> String {
-        self.name.clone()
+        self.config.name.clone()
     }
 
     pub fn set_env(&mut self, key: String, val: String) {
-        self.environment.insert(key, val);
+        self.config.environment.insert(key, val);
     }
 }
 
-impl TryFrom<&CliOptions> for Action {
-    type Error = GitOpsError;
-
-    fn try_from(opts: &CliOptions) -> Result<Self, Self::Error> {
-        let mut environment = HashMap::new();
-        for env in &opts.environment {
-            let (key, val) = env
-                .split_once('=')
-                .ok_or_else(|| GitOpsError::InvalidEnvVar(env.clone()))?;
-            environment.insert(key.to_owned(), val.to_owned());
-        }
-        Ok(Self {
-            name: opts.action.clone().unwrap(),
-            // TODO --action won't work on Windows
-            entrypoint: "/bin/sh".to_string(),
-            args: vec!["-c".to_string(), opts.action.clone().unwrap()],
-            environment,
-            inherit_environment: false,
-        })
-    }
-}
-
-fn build_command(action: &Action, cwd: &Path) -> Command {
-    let mut command = Command::new(action.entrypoint.clone());
-    command.args(action.args.clone());
-    if !action.inherit_environment {
+fn build_command(config: &ActionConfig, cwd: &Path) -> Command {
+    let mut command = Command::new(config.entrypoint.clone());
+    command.args(config.args.clone());
+    if !config.inherit_environment {
         command.env_clear();
         if let Ok(path) = std::env::var("PATH") {
             command.env("PATH", path);
         }
     }
-    command.envs(action.environment.iter());
+    command.envs(config.environment.iter());
     command.current_dir(cwd);
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
@@ -121,7 +93,7 @@ pub fn run_action<F>(
 where
     F: Fn(WorkloadEvent) -> Result<(), GitOpsError> + Send + 'static,
 {
-    let mut command = build_command(action, cwd);
+    let mut command = build_command(&action.config, cwd);
     let mut child = command.spawn().map_err(GitOpsError::ActionError)?;
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
@@ -152,6 +124,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::HashMap,
         process::ExitStatus,
         sync::{Arc, Mutex},
         time::Duration,
@@ -162,11 +135,13 @@ mod tests {
 
     fn shell_action(cmd: &str) -> Action {
         Action {
-            name: "test".to_owned(),
-            entrypoint: "/bin/sh".to_owned(),
-            args: vec!["-c".to_owned(), cmd.to_owned()],
-            environment: HashMap::new(),
-            inherit_environment: false,
+            config: ActionConfig {
+                name: "test".to_owned(),
+                entrypoint: "/bin/sh".to_owned(),
+                args: vec!["-c".to_owned(), cmd.to_owned()],
+                environment: HashMap::new(),
+                inherit_environment: false,
+            },
         }
     }
 

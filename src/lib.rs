@@ -3,8 +3,9 @@ use std::{thread::sleep, time::Duration};
 use task::{scheduled::ScheduledTask, Workload};
 
 pub mod actions;
+pub mod config;
 pub mod errors;
-pub mod git;
+pub mod gix;
 pub mod opts;
 pub mod receiver;
 pub mod store;

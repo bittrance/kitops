@@ -1,17 +1,17 @@
 use std::{fs::File, path::PathBuf, sync::mpsc::channel, thread::spawn, time::Duration};
 
 use clap::Parser;
-use serde::Deserialize;
 
 use crate::{
+    config::{read_config, GitTaskConfig},
     errors::GitOpsError,
+    gix::DefaultUrlProvider,
     receiver::logging_receiver,
     store::{FileStore, Store},
     task::{
         github::{github_watcher, GithubUrlProvider},
-        gixworkload::GitWorkload,
+        gitworkload::GitWorkload,
         scheduled::ScheduledTask,
-        GitTaskConfig,
     },
 };
 
@@ -91,25 +91,21 @@ impl CliOptions {
     }
 }
 
-#[derive(Deserialize)]
-struct ConfigFile {
-    tasks: Vec<GitTaskConfig>,
-}
-
 fn into_task(mut config: GitTaskConfig, opts: &CliOptions) -> ScheduledTask<GitWorkload> {
+    let repo_dir = opts.repo_dir.clone().unwrap();
     let github = config.github.take();
-    let mut slug = None; // TODO Yuck!
-    if let Some(ref github) = github {
-        let provider = GithubUrlProvider::new(config.git.url.url().clone(), github);
-        slug = Some(provider.repo_slug());
-        config.upgrade_url_provider(|_| provider);
-    }
-    let mut work = GitWorkload::from_config(config, opts);
-    if let Some(github) = github {
+    let mut work = if let Some(github) = github {
+        let provider = GithubUrlProvider::new(config.git.url.clone(), &github);
+        let slug = Some(provider.repo_slug());
+        let mut work = GitWorkload::new(config, provider, &repo_dir);
         if github.status_context.is_some() {
             work.watch(github_watcher(slug.unwrap(), github));
         }
-    }
+        work
+    } else {
+        let provider = DefaultUrlProvider::new(config.git.url.clone());
+        GitWorkload::new(config, provider, &repo_dir)
+    };
     let (tx, rx) = channel();
     work.watch(move |event| {
         tx.send(event)
@@ -125,8 +121,7 @@ fn into_task(mut config: GitTaskConfig, opts: &CliOptions) -> ScheduledTask<GitW
 fn tasks_from_file(opts: &CliOptions) -> Result<Vec<ScheduledTask<GitWorkload>>, GitOpsError> {
     let config =
         File::open(opts.config_file.clone().unwrap()).map_err(GitOpsError::MissingConfig)?;
-    let config_file: ConfigFile =
-        serde_yaml::from_reader(config).map_err(GitOpsError::MalformedConfig)?;
+    let config_file = read_config(config)?;
     Ok(config_file
         .tasks
         .into_iter()
@@ -176,17 +171,4 @@ fn complete_cli_options_conflicting_args() {
     ]);
     let res = opts.complete();
     assert!(matches!(res, Err(GitOpsError::ConfigMethodConflict)));
-}
-
-#[test]
-fn minimum_config() {
-    let config = r#"tasks:
-  - name: testo
-    git:
-      url: https://github.com/bittrance/kitops
-    actions:
-      - name: list files
-        entrypoint: /bin/ls
-"#;
-    serde_yaml::from_str::<ConfigFile>(config).unwrap();
 }

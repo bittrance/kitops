@@ -1,21 +1,15 @@
 use std::{
     path::PathBuf,
-    sync::Arc,
     time::{Duration, SystemTime},
 };
 
-use gix::{hash::Kind, ObjectId, Url};
-use serde::{Deserialize, Deserializer, Serialize};
+use gix::{hash::Kind, ObjectId};
+use serde::{Deserialize, Serialize};
 
-use crate::{
-    actions::Action,
-    errors::GitOpsError,
-    git::{GitConfig, UrlProvider},
-    opts::CliOptions,
-};
+use crate::errors::GitOpsError;
 
 pub mod github;
-pub mod gixworkload;
+pub mod gitworkload;
 pub mod scheduled;
 
 pub trait Workload {
@@ -36,94 +30,5 @@ impl Default for State {
             current_sha: ObjectId::null(Kind::Sha1),
             next_run: SystemTime::now(),
         }
-    }
-}
-
-fn human_readable_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s: String = Deserialize::deserialize(deserializer)?;
-    humantime::parse_duration(&s).map_err(serde::de::Error::custom)
-}
-
-#[derive(Clone, Deserialize)]
-pub struct GitTaskConfig {
-    name: String,
-    pub github: Option<github::GithubConfig>,
-    pub git: GitConfig,
-    actions: Vec<Action>,
-    #[serde(
-        default = "GitTaskConfig::default_interval",
-        deserialize_with = "human_readable_duration"
-    )]
-    interval: Duration,
-    #[serde(
-        default = "GitTaskConfig::default_timeout",
-        deserialize_with = "human_readable_duration"
-    )]
-    timeout: Duration,
-}
-
-impl GitTaskConfig {
-    pub fn upgrade_url_provider<U, Q>(&mut self, upgrader: U)
-    where
-        U: FnOnce(&Arc<Box<dyn UrlProvider>>) -> Q,
-        Q: UrlProvider + 'static,
-    {
-        let new_provider = upgrader(&self.git.url);
-        self.git.url = Arc::new(Box::new(new_provider));
-    }
-
-    pub fn add_action(&mut self, action: Action) {
-        self.actions.push(action);
-    }
-}
-
-impl TryFrom<&CliOptions> for GitTaskConfig {
-    type Error = GitOpsError;
-
-    fn try_from(opts: &CliOptions) -> Result<Self, Self::Error> {
-        let url = Url::try_from(opts.url.clone().unwrap()).map_err(GitOpsError::InvalidUrl)?;
-        let action: Action = TryFrom::try_from(opts)?;
-        Ok(Self {
-            name: url.path.to_string(),
-            github: TryFrom::try_from(opts)?,
-            git: TryFrom::try_from(opts)?,
-            actions: vec![action],
-            interval: opts.interval.unwrap_or(Self::default_interval()),
-            timeout: opts.timeout.unwrap_or(Self::default_timeout()),
-        })
-    }
-}
-
-impl GitTaskConfig {
-    pub fn default_interval() -> Duration {
-        Duration::from_secs(60)
-    }
-
-    pub fn default_timeout() -> Duration {
-        Duration::from_secs(3600)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use super::GitTaskConfig;
-
-    #[test]
-    fn parse_gittaskconfig() {
-        let raw_config = r#"name: testo
-git:
-  url: https://github.com/bittrance/kitops
-timeout: 3s
-interval: 1m 2s
-actions: []
-      "#;
-        let config = serde_yaml::from_str::<GitTaskConfig>(raw_config).unwrap();
-        assert_eq!(config.timeout, Duration::from_secs(3));
-        assert_eq!(config.interval, Duration::from_secs(62));
     }
 }

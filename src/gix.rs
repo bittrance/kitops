@@ -23,45 +23,8 @@ use gix::{
     remote::{fetch::Outcome, ref_map::Options, Direction},
     ObjectId, Repository, Url,
 };
-use serde::{Deserialize, Deserializer};
 
-use crate::{errors::GitOpsError, opts::CliOptions, utils::Watchdog};
-
-#[derive(Clone, Deserialize)]
-pub struct GitConfig {
-    #[serde(deserialize_with = "url_from_string")]
-    pub url: Arc<Box<dyn UrlProvider>>,
-    #[serde(default = "GitConfig::default_branch")]
-    branch: String,
-}
-
-impl GitConfig {
-    pub fn default_branch() -> String {
-        "main".to_owned()
-    }
-}
-
-impl TryFrom<&CliOptions> for GitConfig {
-    type Error = GitOpsError;
-
-    fn try_from(opts: &CliOptions) -> Result<Self, Self::Error> {
-        let url = Url::try_from(opts.url.clone().unwrap()).map_err(GitOpsError::InvalidUrl)?;
-        Ok(GitConfig {
-            url: Arc::new(Box::new(DefaultUrlProvider { url })),
-            branch: opts.branch.clone(),
-        })
-    }
-}
-
-fn url_from_string<'de, D>(deserializer: D) -> Result<Arc<Box<dyn UrlProvider>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s: String = Deserialize::deserialize(deserializer)?;
-    Ok(Arc::new(Box::new(DefaultUrlProvider {
-        url: Url::try_from(s).map_err(serde::de::Error::custom)?,
-    })))
-}
+use crate::{errors::GitOpsError, utils::Watchdog};
 
 pub trait UrlProvider: Send + Sync {
     fn url(&self) -> &Url;
@@ -78,6 +41,12 @@ pub struct DefaultUrlProvider {
     url: Url,
 }
 
+impl DefaultUrlProvider {
+    pub fn new(url: Url) -> Self {
+        DefaultUrlProvider { url }
+    }
+}
+
 impl UrlProvider for DefaultUrlProvider {
     fn url(&self) -> &Url {
         &self.url
@@ -88,24 +57,19 @@ impl UrlProvider for DefaultUrlProvider {
     }
 }
 
-fn clone_repo(
-    config: &GitConfig,
-    deadline: Instant,
-    target: &Path,
-) -> Result<Repository, GitOpsError> {
+// TODO What about branch?!
+fn clone_repo(url: Url, deadline: Instant, target: &Path) -> Result<Repository, GitOpsError> {
     let watchdog = Watchdog::new(deadline);
     scope(|s| {
         s.spawn(watchdog.runner());
-        let maybe_repo = config.url.auth_url().and_then(|url| {
-            gix::prepare_clone(url, target)
-                .unwrap()
-                .with_in_memory_config_overrides(vec![gitoxide::Credentials::TERMINAL_PROMPT
-                    .validated_assignment_fmt(&false)
-                    .unwrap()])
-                .fetch_only(Discard, &watchdog)
-                .map(|(r, _)| r)
-                .map_err(GitOpsError::InitRepo)
-        });
+        let maybe_repo = gix::prepare_clone(url, target)
+            .unwrap()
+            .with_in_memory_config_overrides(vec![gitoxide::Credentials::TERMINAL_PROMPT
+                .validated_assignment_fmt(&false)
+                .unwrap()])
+            .fetch_only(Discard, &watchdog)
+            .map(|(r, _)| r)
+            .map_err(GitOpsError::InitRepo);
         watchdog.cancel();
         maybe_repo
     })
@@ -113,12 +77,13 @@ fn clone_repo(
 
 fn perform_fetch(
     repo: &Repository,
-    config: &GitConfig,
+    url: Url,
+    branch: &str,
     cancel: &AtomicBool,
 ) -> Result<Outcome, Box<dyn std::error::Error + Send + Sync>> {
-    repo.remote_at(config.url.auth_url()?)
+    repo.remote_at(url)
         .unwrap()
-        .with_refspecs([BString::from(config.branch.clone())], Direction::Fetch)
+        .with_refspecs([BString::from(branch)], Direction::Fetch)
         .unwrap()
         .connect(Direction::Fetch)?
         .prepare_fetch(Discard, Options::default())?
@@ -126,15 +91,20 @@ fn perform_fetch(
         .map_err(Into::into)
 }
 
-fn fetch_repo(repo: &Repository, config: &GitConfig, deadline: Instant) -> Result<(), GitOpsError> {
+fn fetch_repo(
+    repo: &Repository,
+    url: Url,
+    branch: &str,
+    deadline: Instant,
+) -> Result<(), GitOpsError> {
     let watchdog = Watchdog::new(deadline);
     let outcome = scope(|s| {
         s.spawn(watchdog.runner());
-        let outcome = perform_fetch(repo, config, &watchdog).map_err(GitOpsError::FetchError);
+        let outcome = perform_fetch(repo, url, branch, &watchdog).map_err(GitOpsError::FetchError);
         watchdog.cancel();
         outcome
     })?;
-    let needle = BString::from("refs/heads/".to_owned() + &config.branch);
+    let needle = BString::from("refs/heads/".to_owned() + branch);
     let target = outcome
         .ref_map
         .remote_refs
@@ -230,7 +200,8 @@ fn checkout_worktree(
 }
 
 pub fn ensure_worktree<P, Q>(
-    config: &GitConfig,
+    url: Url,
+    branch: &str,
     deadline: Instant,
     repodir: P,
     workdir: Q,
@@ -251,48 +222,35 @@ where
             .set_value(&Credentials::TERMINAL_PROMPT, "false")
             .unwrap();
         gitconfig.commit().unwrap();
-        fetch_repo(&repo, config, deadline)?;
+        fetch_repo(&repo, url, branch, deadline)?;
         repo
     } else {
-        clone_repo(config, deadline, repodir)?
+        clone_repo(url, deadline, repodir)?
     };
-    checkout_worktree(&repo, &config.branch, workdir)
+    checkout_worktree(&repo, branch, workdir)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::Arc,
-        time::{Duration, Instant},
-    };
+    use std::time::{Duration, Instant};
 
-    use crate::{
-        errors::GitOpsError,
-        git::{clone_repo, fetch_repo, GitConfig},
-        testutils::TestUrl,
-    };
+    use crate::gix::{clone_repo, fetch_repo};
+
+    const TEST_URL: &str = "https://example.com";
 
     #[test]
     fn clone_with_bad_url() {
-        let config = GitConfig {
-            url: Arc::new(Box::new(TestUrl::new(Some(GitOpsError::TestError)))),
-            branch: "main".into(),
-        };
         let deadline = Instant::now() + Duration::from_secs(61); // Fail tests that time out
         let target = tempfile::tempdir().unwrap();
-        let result = clone_repo(&config, deadline, target.path());
-        assert!(matches!(result, Err(GitOpsError::TestError)));
+        let result = clone_repo(TEST_URL.try_into().unwrap(), deadline, target.path());
+        assert!(result.is_err());
     }
 
     #[test]
     fn fetch_with_bad_url() {
         let repo = gix::open(".").unwrap();
-        let config = GitConfig {
-            url: Arc::new(Box::new(TestUrl::new(Some(GitOpsError::TestError)))),
-            branch: "main".into(),
-        };
         let deadline = Instant::now() + Duration::from_secs(61); // Fail tests that time out
-        let result = fetch_repo(&repo, &config, deadline);
+        let result = fetch_repo(&repo, TEST_URL.try_into().unwrap(), "main", deadline);
         assert!(result.is_err());
     }
 }

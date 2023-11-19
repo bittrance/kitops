@@ -2,7 +2,7 @@ use xshell::cmd;
 
 use std::time::{Duration, Instant};
 
-use kitops::git::{ensure_worktree, GitConfig};
+use kitops::{config::GitConfig, gix::ensure_worktree};
 
 use utils::{clone_repo, commit_file, empty_repo, reset_branch, shell, TEST_CONFIG};
 
@@ -15,7 +15,7 @@ fn clone_repo_from_github_https() {
     let deadline = Instant::now() + Duration::from_secs(60);
     let repodir = tempfile::tempdir().unwrap();
     let workdir = tempfile::tempdir().unwrap();
-    ensure_worktree(&config, deadline, &repodir, &workdir).unwrap();
+    ensure_worktree(config.url, &config.branch, deadline, &repodir, &workdir).unwrap();
     sh.change_dir(&workdir);
     let files = cmd!(sh, "ls").read().unwrap();
     assert!(files.contains("Cargo.toml"));
@@ -35,14 +35,28 @@ fn fetch_repo_from_file_url() {
             .unwrap();
     let deadline = Instant::now() + Duration::from_secs(60);
     let workdir = tempfile::tempdir().unwrap();
-    ensure_worktree(&config, deadline, &repodir, &workdir).unwrap();
+    ensure_worktree(
+        config.url.clone(),
+        &config.branch,
+        deadline,
+        &repodir,
+        &workdir,
+    )
+    .unwrap();
     assert_eq!(
         sh.read_file(workdir.path().join("ze-file")).unwrap(),
         "revision 1"
     );
     commit_file(&upstream, "revision 2");
     let workdir = tempfile::tempdir().unwrap();
-    ensure_worktree(&config, deadline, &repodir, &workdir).unwrap();
+    ensure_worktree(
+        config.url.clone(),
+        &config.branch,
+        deadline,
+        &repodir,
+        &workdir,
+    )
+    .unwrap();
     assert_eq!(
         sh.read_file(workdir.path().join("ze-file")).unwrap(),
         "revision 2"
@@ -62,7 +76,7 @@ fn fetch_repo_with_force_push() {
             .unwrap();
     let deadline = Instant::now() + Duration::from_secs(60);
     let workdir = tempfile::tempdir().unwrap();
-    ensure_worktree(&config, deadline, &repodir, &workdir).unwrap();
+    ensure_worktree(config.url, &config.branch, deadline, &repodir, &workdir).unwrap();
     assert_eq!(
         sh.read_file(workdir.path().join("ze-file")).unwrap(),
         "revision 1"
