@@ -6,11 +6,13 @@ use serde::{Deserialize, Deserializer};
 use crate::{errors::GitOpsError, opts::CliOptions};
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigFile {
     pub tasks: Vec<GitTaskConfig>,
 }
 
 #[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GitTaskConfig {
     pub name: String,
     pub github: Option<GithubConfig>,
@@ -56,6 +58,7 @@ impl TryFrom<&CliOptions> for GitTaskConfig {
 }
 
 #[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GithubConfig {
     pub app_id: String,
     pub private_key_file: PathBuf,
@@ -86,6 +89,7 @@ impl TryFrom<&CliOptions> for Option<GithubConfig> {
 }
 
 #[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GitConfig {
     #[serde(deserialize_with = "url_from_string")]
     pub url: Url,
@@ -112,6 +116,7 @@ impl TryFrom<&CliOptions> for GitConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ActionConfig {
     pub name: String,
     pub entrypoint: String,
@@ -169,7 +174,7 @@ pub fn read_config(reader: impl Read) -> Result<ConfigFile, GitOpsError> {
 mod tests {
     use std::time::Duration;
 
-    use crate::config::GitTaskConfig;
+    use crate::{config::GitTaskConfig, errors::GitOpsError};
 
     use super::read_config;
 
@@ -182,6 +187,55 @@ mod tests {
     actions:
       - name: list files
         entrypoint: /bin/ls
+"#;
+        read_config(config.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn fail_on_unknown_git_config() {
+        let config = r#"tasks:
+  - name: testo
+    git:
+      url: https://github.com/bittrance/kitops
+      non: sense
+    actions:
+      - name: list files
+        entrypoint: /bin/ls
+"#;
+        assert!(matches!(
+            read_config(config.as_bytes()),
+            Err(GitOpsError::MalformedConfig(_))
+        ));
+    }
+
+    #[test]
+    fn fail_on_unknown_action_config() {
+        let config = r#"tasks:
+  - name: testo
+    git:
+      url: https://github.com/bittrance/kitops
+    actions:
+      - name: list files
+        non: sense
+        entrypoint: /bin/ls
+"#;
+        assert!(matches!(
+            read_config(config.as_bytes()),
+            Err(GitOpsError::MalformedConfig(_))
+        ));
+    }
+
+    #[test]
+    fn action_environment_config() {
+        let config = r#"tasks:
+  - name: testo
+    git:
+      url: https://github.com/bittrance/kitops
+    actions:
+      - name: list files
+        entrypoint: /bin/ls
+        environment:
+            FOO: bar
 "#;
         read_config(config.as_bytes()).unwrap();
     }
