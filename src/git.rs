@@ -8,7 +8,10 @@ use std::{
 
 use gix::{
     bstr::{BString, ByteSlice},
-    config::tree::User,
+    config::tree::{
+        gitoxide::{self, Credentials},
+        Key, User,
+    },
     objs::Data,
     odb::{store::Handle, Cache, Store},
     oid,
@@ -96,6 +99,9 @@ fn clone_repo(
         let maybe_repo = config.url.auth_url().and_then(|url| {
             gix::prepare_clone(url, target)
                 .unwrap()
+                .with_in_memory_config_overrides(vec![gitoxide::Credentials::TERMINAL_PROMPT
+                    .validated_assignment_fmt(&false)
+                    .unwrap()])
                 .fetch_only(Discard, &watchdog)
                 .map(|(r, _)| r)
                 .map_err(GitOpsError::InitRepo)
@@ -241,6 +247,9 @@ where
         let mut gitconfig = repo.config_snapshot_mut();
         gitconfig.set_value(&User::NAME, "kitops").unwrap();
         gitconfig.set_value(&User::EMAIL, "none").unwrap();
+        gitconfig
+            .set_value(&Credentials::TERMINAL_PROMPT, "false")
+            .unwrap();
         gitconfig.commit().unwrap();
         fetch_repo(&repo, config, deadline)?;
         repo

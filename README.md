@@ -19,6 +19,7 @@ The plan forward, roughly in falling priority:
 - [x] changed task config should override state loaded from disk
 - [x] docker packaging
 - [ ] readme with design and deployment options
+- [ ] branch patterns allows a task to react to changes on many branches
 - [ ] intelligent gitconfig handling
 - [ ] allow git commands in workdir (but note that this means two tasks can no longer point to the same repo without additional changeas)
 - [ ] useful logging (log level, json)
