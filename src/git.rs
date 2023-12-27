@@ -1,9 +1,20 @@
-use std::{path::Path, sync::atomic::AtomicBool, thread::scope, time::Instant};
+use std::{
+    cell::RefCell,
+    path::Path,
+    sync::{atomic::AtomicBool, Arc},
+    thread::scope,
+    time::Instant,
+};
 
 use gix::{
     bstr::{BString, ByteSlice},
-    config::tree::User,
-    prelude::FindExt,
+    config::tree::{
+        gitoxide::{self, Credentials},
+        Key, User,
+    },
+    objs::Data,
+    odb::{store::Handle, Cache, Store},
+    oid,
     progress::Discard,
     refs::{
         transaction::{Change, LogChange, RefEdit},
@@ -19,17 +30,12 @@ use crate::{errors::GitOpsError, opts::CliOptions, utils::Watchdog};
 #[derive(Clone, Deserialize)]
 pub struct GitConfig {
     #[serde(deserialize_with = "url_from_string")]
-    url: Url,
+    pub url: Arc<Box<dyn UrlProvider>>,
     #[serde(default = "GitConfig::default_branch")]
     branch: String,
 }
 
 impl GitConfig {
-    pub fn safe_url(&self) -> String {
-        // TODO Change to whitelist of allowed characters
-        self.url.to_bstring().to_string().replace(['/', ':'], "_")
-    }
-
     pub fn default_branch() -> String {
         "main".to_owned()
     }
@@ -41,18 +47,45 @@ impl TryFrom<&CliOptions> for GitConfig {
     fn try_from(opts: &CliOptions) -> Result<Self, Self::Error> {
         let url = Url::try_from(opts.url.clone().unwrap()).map_err(GitOpsError::InvalidUrl)?;
         Ok(GitConfig {
-            url,
+            url: Arc::new(Box::new(DefaultUrlProvider { url })),
             branch: opts.branch.clone(),
         })
     }
 }
 
-fn url_from_string<'de, D>(deserializer: D) -> Result<Url, D::Error>
+fn url_from_string<'de, D>(deserializer: D) -> Result<Arc<Box<dyn UrlProvider>>, D::Error>
 where
     D: Deserializer<'de>,
 {
     let s: String = Deserialize::deserialize(deserializer)?;
-    Url::try_from(s).map_err(serde::de::Error::custom)
+    Ok(Arc::new(Box::new(DefaultUrlProvider {
+        url: Url::try_from(s).map_err(serde::de::Error::custom)?,
+    })))
+}
+
+pub trait UrlProvider: Send + Sync {
+    fn url(&self) -> &Url;
+    fn auth_url(&self) -> Result<Url, GitOpsError>;
+
+    fn safe_url(&self) -> String {
+        // TODO Change to whitelist of allowed characters
+        self.url().to_bstring().to_string().replace(['/', ':'], "_")
+    }
+}
+
+#[derive(Clone)]
+pub struct DefaultUrlProvider {
+    url: Url,
+}
+
+impl UrlProvider for DefaultUrlProvider {
+    fn url(&self) -> &Url {
+        &self.url
+    }
+
+    fn auth_url(&self) -> Result<Url, GitOpsError> {
+        Ok(self.url.clone())
+    }
 }
 
 fn clone_repo(
@@ -63,13 +96,18 @@ fn clone_repo(
     let watchdog = Watchdog::new(deadline);
     scope(|s| {
         s.spawn(watchdog.runner());
-        let repo = gix::prepare_clone(config.url.clone(), target)
-            .unwrap()
-            .fetch_only(Discard, &watchdog)
-            .map(|(r, _)| r)
-            .map_err(GitOpsError::InitRepo);
+        let maybe_repo = config.url.auth_url().and_then(|url| {
+            gix::prepare_clone(url, target)
+                .unwrap()
+                .with_in_memory_config_overrides(vec![gitoxide::Credentials::TERMINAL_PROMPT
+                    .validated_assignment_fmt(&false)
+                    .unwrap()])
+                .fetch_only(Discard, &watchdog)
+                .map(|(r, _)| r)
+                .map_err(GitOpsError::InitRepo)
+        });
         watchdog.cancel();
-        repo
+        maybe_repo
     })
 }
 
@@ -78,7 +116,7 @@ fn perform_fetch(
     config: &GitConfig,
     cancel: &AtomicBool,
 ) -> Result<Outcome, Box<dyn std::error::Error + Send + Sync>> {
-    repo.remote_at(config.url.clone())
+    repo.remote_at(config.url.auth_url()?)
         .unwrap()
         .with_refspecs([BString::from(config.branch.clone())], Direction::Fetch)
         .unwrap()
@@ -122,6 +160,41 @@ fn fetch_repo(repo: &Repository, config: &GitConfig, deadline: Instant) -> Resul
     Ok(())
 }
 
+#[derive(Clone)]
+struct MaybeFind<Allow: Clone, Find: Clone> {
+    allow: std::cell::RefCell<Allow>,
+    objects: Find,
+}
+
+impl<Allow, Find> gix::prelude::Find for MaybeFind<Allow, Find>
+where
+    Allow: FnMut(&oid) -> bool + Send + Clone,
+    Find: gix::prelude::Find + Send + Clone,
+{
+    fn try_find<'a>(
+        &self,
+        id: &oid,
+        buf: &'a mut Vec<u8>,
+    ) -> Result<Option<Data<'a>>, Box<dyn std::error::Error + Send + Sync>> {
+        if (self.allow.borrow_mut())(id) {
+            self.objects.try_find(id, buf)
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+fn can_we_please_have_impl_in_type_alias_already() -> impl FnMut(&oid) -> bool + Send + Clone {
+    |_| true
+}
+
+fn make_finder(odb: Cache<Handle<Arc<Store>>>) -> impl gix::prelude::Find + Send + Clone {
+    MaybeFind {
+        allow: RefCell::new(can_we_please_have_impl_in_type_alias_already()),
+        objects: odb,
+    }
+}
+
 fn checkout_worktree(
     repo: &Repository,
     branch: &str,
@@ -142,10 +215,11 @@ fn checkout_worktree(
         .unwrap();
     let (mut state, _) = repo.index_from_tree(&tree_id).unwrap().into_parts();
     let odb = repo.objects.clone().into_arc().unwrap();
+    let db = make_finder(odb);
     let _outcome = gix::worktree::state::checkout(
         &mut state,
         workdir,
-        move |oid, buf| odb.find_blob(oid, buf),
+        db,
         &Discard,
         &Discard,
         &AtomicBool::default(),
@@ -173,6 +247,9 @@ where
         let mut gitconfig = repo.config_snapshot_mut();
         gitconfig.set_value(&User::NAME, "kitops").unwrap();
         gitconfig.set_value(&User::EMAIL, "none").unwrap();
+        gitconfig
+            .set_value(&Credentials::TERMINAL_PROMPT, "false")
+            .unwrap();
         gitconfig.commit().unwrap();
         fetch_repo(&repo, config, deadline)?;
         repo
@@ -180,4 +257,42 @@ where
         clone_repo(config, deadline, repodir)?
     };
     checkout_worktree(&repo, &config.branch, workdir)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    use crate::{
+        errors::GitOpsError,
+        git::{clone_repo, fetch_repo, GitConfig},
+        testutils::TestUrl,
+    };
+
+    #[test]
+    fn clone_with_bad_url() {
+        let config = GitConfig {
+            url: Arc::new(Box::new(TestUrl::new(Some(GitOpsError::TestError)))),
+            branch: "main".into(),
+        };
+        let deadline = Instant::now() + Duration::from_secs(61); // Fail tests that time out
+        let target = tempfile::tempdir().unwrap();
+        let result = clone_repo(&config, deadline, target.path());
+        assert!(matches!(result, Err(GitOpsError::TestError)));
+    }
+
+    #[test]
+    fn fetch_with_bad_url() {
+        let repo = gix::open(".").unwrap();
+        let config = GitConfig {
+            url: Arc::new(Box::new(TestUrl::new(Some(GitOpsError::TestError)))),
+            branch: "main".into(),
+        };
+        let deadline = Instant::now() + Duration::from_secs(61); // Fail tests that time out
+        let result = fetch_repo(&repo, &config, deadline);
+        assert!(result.is_err());
+    }
 }

@@ -8,7 +8,10 @@ use crate::{
     receiver::logging_receiver,
     store::{FileStore, Store},
     task::{
-        github::github_watcher, gixworkload::GitWorkload, scheduled::ScheduledTask, GitTaskConfig,
+        github::{github_watcher, GithubUrlProvider},
+        gixworkload::GitWorkload,
+        scheduled::ScheduledTask,
+        GitTaskConfig,
     },
 };
 
@@ -37,18 +40,15 @@ pub struct CliOptions {
     /// Environment variable for action
     #[clap(long)]
     pub environment: Vec<String>,
-    /// GitHub App ID
+    /// GitHub App ID for authentication with private repos and commit status updates
     #[clap(long)]
     pub github_app_id: Option<String>,
     /// GitHub App private key file
     #[clap(long)]
     pub github_private_key_file: Option<PathBuf>,
-    /// Update GitHub commit status on this repo
+    /// Turn on updating GitHub commit status updates with this context (requires auth flags)
     #[clap(long)]
-    pub github_repo_slug: Option<String>,
-    /// Use this context when updating GitHub commit status
-    #[clap(long)]
-    pub github_context: Option<String>,
+    pub github_status_context: Option<String>,
     /// Check repo for changes at this interval (e.g. 1h, 30m, 10s)
     #[arg(long, value_parser = humantime::parse_duration)]
     pub interval: Option<Duration>,
@@ -97,10 +97,18 @@ struct ConfigFile {
 }
 
 fn into_task(mut config: GitTaskConfig, opts: &CliOptions) -> ScheduledTask<GitWorkload> {
-    let notify_config = config.notify.take();
+    let github = config.github.take();
+    let mut slug = None; // TODO Yuck!
+    if let Some(ref github) = github {
+        let provider = GithubUrlProvider::new(config.git.url.url().clone(), github);
+        slug = Some(provider.repo_slug());
+        config.upgrade_url_provider(|_| provider);
+    }
     let mut work = GitWorkload::from_config(config, opts);
-    if let Some(notify_config) = notify_config {
-        work.watch(github_watcher(notify_config));
+    if let Some(github) = github {
+        if github.status_context.is_some() {
+            work.watch(github_watcher(slug.unwrap(), github));
+        }
     }
     let (tx, rx) = channel();
     work.watch(move |event| {

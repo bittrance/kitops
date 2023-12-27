@@ -54,6 +54,9 @@ pub enum GitOpsError {
     GitHubNetworkError(reqwest::Error),
     #[error("GitHub App is installed but does not have write permissions for commit statuses")]
     GitHubPermissionsError,
+    #[cfg(test)]
+    #[error("Test error")]
+    TestError,
 }
 
 impl GitOpsError {

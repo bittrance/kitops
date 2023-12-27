@@ -1,6 +1,11 @@
-use std::{fs::File, io::Read, path::PathBuf, time::Duration};
+use std::{
+    fs::File,
+    io::Read,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
-use gix::ObjectId;
+use gix::{ObjectId, Url};
 use jwt_simple::prelude::{Claims, RS256KeyPair, RSAKeyPairLike};
 use reqwest::{
     blocking::ClientBuilder,
@@ -9,44 +14,80 @@ use reqwest::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{errors::GitOpsError, opts::CliOptions, receiver::WorkloadEvent};
+use crate::{errors::GitOpsError, git::UrlProvider, opts::CliOptions, receiver::WorkloadEvent};
 
 #[derive(Clone, Deserialize)]
-pub struct GitHubNotifyConfig {
+pub struct GithubConfig {
     app_id: String,
     private_key_file: PathBuf,
-    repo_slug: String,
-    #[serde(default = "GitHubNotifyConfig::default_context")]
-    context: String,
+    #[serde(default = "GithubConfig::default_context")]
+    pub status_context: Option<String>,
 }
 
-impl GitHubNotifyConfig {
-    pub fn default_context() -> String {
-        "kitops".to_owned()
+impl GithubConfig {
+    pub fn default_context() -> Option<String> {
+        Some("kitops".to_owned())
     }
 }
 
-impl TryFrom<&CliOptions> for Option<GitHubNotifyConfig> {
+impl TryFrom<&CliOptions> for Option<GithubConfig> {
     type Error = GitOpsError;
 
     fn try_from(opts: &CliOptions) -> Result<Self, Self::Error> {
-        match (
-            &opts.github_app_id,
-            &opts.github_private_key_file,
-            &opts.github_repo_slug,
-            &opts.github_context,
-        ) {
-            (None, None, None, None) => Ok(None),
-            (Some(app_id), Some(private_key_file), Some(repo_slug), Some(context)) => {
-                Ok(Some(GitHubNotifyConfig {
-                    app_id: app_id.clone(),
-                    private_key_file: private_key_file.clone(),
-                    repo_slug: repo_slug.clone(),
-                    context: context.clone(),
-                }))
-            }
+        match (&opts.github_app_id, &opts.github_private_key_file) {
+            (None, None) => Ok(None),
+            (Some(app_id), Some(private_key_file)) => Ok(Some(GithubConfig {
+                app_id: app_id.clone(),
+                private_key_file: private_key_file.clone(),
+                status_context: opts.github_status_context.clone(),
+            })),
             _ => Err(GitOpsError::InvalidNotifyConfig),
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct GithubUrlProvider {
+    url: Url,
+    app_id: String,
+    private_key_file: PathBuf,
+}
+
+impl GithubUrlProvider {
+    pub fn new(url: Url, config: &GithubConfig) -> Self {
+        GithubUrlProvider {
+            url,
+            app_id: config.app_id.clone(),
+            private_key_file: config.private_key_file.clone(),
+        }
+    }
+
+    pub fn repo_slug(&self) -> String {
+        self.url.path.to_string().replace(".git", "")[1..].to_owned()
+    }
+}
+
+impl UrlProvider for GithubUrlProvider {
+    fn url(&self) -> &Url {
+        &self.url
+    }
+
+    fn auth_url(&self) -> Result<Url, GitOpsError> {
+        let client = http_client();
+        let jwt_token = generate_jwt(&self.app_id, &self.private_key_file)?;
+        let installation_id = get_installation_id(&self.repo_slug(), &client, &jwt_token)?;
+        let access_token = get_access_token(installation_id, &client, &jwt_token)?;
+        // TODO Newer version of gix-url has set_username/set_password
+        Ok(Url::from_parts(
+            self.url.scheme.clone(),
+            Some("x-access-token".to_owned()),
+            Some(access_token),
+            self.url.host().map(str::to_owned),
+            self.url.port,
+            self.url.path.clone(),
+            false,
+        )
+        .unwrap())
     }
 }
 
@@ -62,11 +103,17 @@ pub enum GitHubStatus {
     Error,
 }
 
-fn generate_jwt(config: &GitHubNotifyConfig) -> Result<String, GitOpsError> {
-    let claims = Claims::create(jwt_simple::prelude::Duration::from_secs(60))
-        .with_issuer(config.app_id.clone());
+fn http_client() -> reqwest::blocking::Client {
+    ClientBuilder::new()
+        .connect_timeout(Duration::from_secs(5))
+        .build()
+        .unwrap()
+}
+
+fn generate_jwt(app_id: &str, private_key_file: &Path) -> Result<String, GitOpsError> {
+    let claims = Claims::create(jwt_simple::prelude::Duration::from_secs(60)).with_issuer(app_id);
     let mut buf = String::with_capacity(1800);
-    File::open(&config.private_key_file)
+    File::open(private_key_file)
         .map_err(GitOpsError::GitHubMissingPrivateKeyFile)?
         .read_to_string(&mut buf)
         .map_err(GitOpsError::GitHubMissingPrivateKeyFile)?;
@@ -77,15 +124,12 @@ fn generate_jwt(config: &GitHubNotifyConfig) -> Result<String, GitOpsError> {
 }
 
 fn get_installation_id(
-    config: &GitHubNotifyConfig,
+    repo_slug: &str,
     client: &reqwest::blocking::Client,
     jwt_token: &String,
 ) -> Result<u64, GitOpsError> {
     // TODO Is this different if we are installed organization-wise?
-    let url = format!(
-        "https://api.github.com/repos/{}/installation",
-        config.repo_slug
-    );
+    let url = format!("https://api.github.com/repos/{}/installation", repo_slug);
     let res = client
         .get(&url)
         .header(ACCEPT, "application/vnd.github+json")
@@ -140,27 +184,25 @@ fn get_access_token(
 }
 
 pub fn update_commit_status(
-    config: &GitHubNotifyConfig,
+    repo_slug: &str,
+    config: &GithubConfig,
     sha: &ObjectId,
     status: GitHubStatus,
     message: &str,
 ) -> Result<(), GitOpsError> {
-    let client = ClientBuilder::new()
-        .connect_timeout(Duration::from_secs(5))
-        .build()
-        .unwrap();
-
-    let jwt_token = generate_jwt(config)?;
-    let installation_id = get_installation_id(config, &client, &jwt_token)?;
+    let config = config.clone();
+    let client = http_client();
+    let jwt_token = generate_jwt(&config.app_id, &config.private_key_file)?;
+    let installation_id = get_installation_id(repo_slug, &client, &jwt_token)?;
     let access_token = get_access_token(installation_id, &client, &jwt_token)?;
 
     let url = format!(
         "https://api.github.com/repos/{}/statuses/{}",
-        config.repo_slug, sha
+        repo_slug, sha
     );
     let body = serde_json::json!({
         "state": status,
-        "context": config.context,
+        "context": config.status_context.unwrap(),
         "description": message,
     });
     let res = client
@@ -183,13 +225,15 @@ pub fn update_commit_status(
 }
 
 pub fn github_watcher(
-    notify_config: GitHubNotifyConfig,
+    repo_slug: String,
+    config: GithubConfig,
 ) -> impl Fn(WorkloadEvent) -> Result<(), GitOpsError> + Send + 'static {
     move |event| {
         match event {
             WorkloadEvent::Changes(name, prev_sha, new_sha) => {
                 update_commit_status(
-                    &notify_config,
+                    &repo_slug,
+                    &config,
                     &new_sha,
                     GitHubStatus::Pending,
                     &format!("running {} [last success {}]", name, prev_sha),
@@ -197,7 +241,8 @@ pub fn github_watcher(
             }
             WorkloadEvent::Success(name, new_sha) => {
                 update_commit_status(
-                    &notify_config,
+                    &repo_slug,
+                    &config,
                     &new_sha,
                     GitHubStatus::Success,
                     &format!("{} succeeded", name),
@@ -205,7 +250,8 @@ pub fn github_watcher(
             }
             WorkloadEvent::Failure(task, action, new_sha) => {
                 update_commit_status(
-                    &notify_config,
+                    &repo_slug,
+                    &config,
                     &new_sha,
                     GitHubStatus::Failure,
                     &format!("{} failed on action {}", task, action),
@@ -213,7 +259,8 @@ pub fn github_watcher(
             }
             WorkloadEvent::Error(task, action, new_sha) => {
                 update_commit_status(
-                    &notify_config,
+                    &repo_slug,
+                    &config,
                     &new_sha,
                     GitHubStatus::Error,
                     &format!("{} errored on action {}", task, action),

@@ -1,12 +1,18 @@
 use std::{
     path::PathBuf,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 
 use gix::{hash::Kind, ObjectId, Url};
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::{actions::Action, errors::GitOpsError, git::GitConfig, opts::CliOptions};
+use crate::{
+    actions::Action,
+    errors::GitOpsError,
+    git::{GitConfig, UrlProvider},
+    opts::CliOptions,
+};
 
 pub mod github;
 pub mod gixworkload;
@@ -44,8 +50,8 @@ where
 #[derive(Clone, Deserialize)]
 pub struct GitTaskConfig {
     name: String,
-    git: GitConfig,
-    pub notify: Option<github::GitHubNotifyConfig>,
+    pub github: Option<github::GithubConfig>,
+    pub git: GitConfig,
     actions: Vec<Action>,
     #[serde(
         default = "GitTaskConfig::default_interval",
@@ -60,6 +66,15 @@ pub struct GitTaskConfig {
 }
 
 impl GitTaskConfig {
+    pub fn upgrade_url_provider<U, Q>(&mut self, upgrader: U)
+    where
+        U: FnOnce(&Arc<Box<dyn UrlProvider>>) -> Q,
+        Q: UrlProvider + 'static,
+    {
+        let new_provider = upgrader(&self.git.url);
+        self.git.url = Arc::new(Box::new(new_provider));
+    }
+
     pub fn add_action(&mut self, action: Action) {
         self.actions.push(action);
     }
@@ -73,8 +88,8 @@ impl TryFrom<&CliOptions> for GitTaskConfig {
         let action: Action = TryFrom::try_from(opts)?;
         Ok(Self {
             name: url.path.to_string(),
+            github: TryFrom::try_from(opts)?,
             git: TryFrom::try_from(opts)?,
-            notify: TryFrom::try_from(opts)?,
             actions: vec![action],
             interval: opts.interval.unwrap_or(Self::default_interval()),
             timeout: opts.timeout.unwrap_or(Self::default_timeout()),
