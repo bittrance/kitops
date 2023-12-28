@@ -7,33 +7,46 @@ use std::{
 use gix::ObjectId;
 
 use crate::{
-    actions::{run_action, ActionResult},
+    actions::{run_action, Action, ActionResult},
+    config::GitTaskConfig,
     errors::GitOpsError,
-    git::ensure_worktree,
-    opts::CliOptions,
+    gix::{ensure_worktree, UrlProvider},
     receiver::WorkloadEvent,
 };
 
-use super::{GitTaskConfig, Workload};
+pub trait Workload {
+    fn id(&self) -> String;
+    fn interval(&self) -> Duration;
+    fn perform(self, workdir: PathBuf, current_sha: ObjectId) -> Result<ObjectId, GitOpsError>;
+}
 
 #[allow(clippy::type_complexity)]
 #[derive(Clone)]
 pub struct GitWorkload {
+    actions: Vec<Action>,
     config: GitTaskConfig,
+    url_provider: Arc<Box<dyn UrlProvider>>,
     repo_dir: PathBuf,
     watchers:
         Vec<Arc<Mutex<Box<dyn Fn(WorkloadEvent) -> Result<(), GitOpsError> + Send + 'static>>>>,
 }
 
 impl GitWorkload {
-    pub fn from_config(config: GitTaskConfig, opts: &CliOptions) -> Self {
-        let repo_dir = opts
-            .repo_dir
-            .as_ref()
-            .map(|dir| dir.join(config.git.url.safe_url()))
-            .unwrap();
+    pub fn new(
+        config: GitTaskConfig,
+        url_provider: impl UrlProvider + 'static,
+        repo_dir: &Path,
+    ) -> Self {
+        let repo_dir = repo_dir.join(url_provider.safe_url());
+        let actions = config
+            .actions
+            .iter()
+            .map(|config| Action::new(config.clone()))
+            .collect();
         GitWorkload {
+            actions,
             config,
+            url_provider: Arc::new(Box::new(url_provider)),
             repo_dir,
             watchers: Vec::new(),
         }
@@ -52,7 +65,7 @@ impl GitWorkload {
         deadline: Instant,
         sink: &Arc<Mutex<impl Fn(WorkloadEvent) -> Result<(), GitOpsError> + Send + 'static>>,
     ) -> Result<Option<String>, GitOpsError> {
-        for action in &self.config.actions {
+        for action in &self.actions {
             let name = format!("{}|{}", self.config.name, action.id());
             let res = run_action(&name, action, workdir, deadline, sink)?;
             if res != ActionResult::Success {
@@ -81,9 +94,11 @@ impl Workload for GitWorkload {
             }
             Ok::<_, GitOpsError>(())
         }));
-        let new_sha = ensure_worktree(&self.config.git, deadline, &self.repo_dir, &workdir)?;
+        let url = self.url_provider.auth_url()?;
+        let branch = self.config.git.branch.clone();
+        let new_sha = ensure_worktree(url, &branch, deadline, &self.repo_dir, &workdir)?;
         if current_sha != new_sha {
-            self.config.actions.iter_mut().for_each(|action| {
+            self.actions.iter_mut().for_each(|action| {
                 action.set_env(
                     "KITOPS_LAST_SUCCESSFUL_SHA".to_string(),
                     current_sha.to_string(),

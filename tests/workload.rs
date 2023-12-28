@@ -1,20 +1,16 @@
 use std::sync::{Arc, Mutex};
 
-use clap::Parser;
 use gix::{hash::Kind, ObjectId};
 use kitops::{
+    config::GitTaskConfig,
     errors::GitOpsError,
-    opts::CliOptions,
+    gix::DefaultUrlProvider,
     receiver::{SourceType, WorkloadEvent},
-    task::{gixworkload::GitWorkload, GitTaskConfig, Workload},
+    workload::{GitWorkload, Workload},
 };
 use utils::*;
 
 mod utils;
-
-fn cli_options(repodir: &tempfile::TempDir) -> CliOptions {
-    CliOptions::parse_from(&["kitops", "--repo-dir", &repodir.path().to_str().unwrap()])
-}
 
 fn config(upstream: &tempfile::TempDir, entrypoint: &str, args: &[&str]) -> GitTaskConfig {
     serde_yaml::from_str(&format!(
@@ -58,9 +54,9 @@ fn watch_successful_workload() {
     let repodir = tempfile::tempdir().unwrap();
     let next_sha = ObjectId::from_hex(next_sha.as_bytes()).unwrap();
     let workdir = tempfile::tempdir().unwrap();
-    let opts = cli_options(&repodir);
     let config = config(&upstream, "/bin/ls", &[]);
-    let mut workload = GitWorkload::from_config(config, &opts);
+    let provider = DefaultUrlProvider::new(config.git.url.clone());
+    let mut workload = GitWorkload::new(config, provider, &repodir.path());
     let events = Arc::new(Mutex::new(Vec::new()));
     let events2 = events.clone();
     workload.watch(move |event| {
@@ -86,9 +82,9 @@ fn watch_failing_workload() {
     commit_file(&upstream, "revision 1");
     let repodir = tempfile::tempdir().unwrap();
     let workdir = tempfile::tempdir().unwrap();
-    let opts = cli_options(&repodir);
     let config = config(&upstream, "/usr/bin/false", &[]);
-    let mut workload = GitWorkload::from_config(config, &opts);
+    let provider = DefaultUrlProvider::new(config.git.url.clone());
+    let mut workload = GitWorkload::new(config, provider, &repodir.path());
     let events = Arc::new(Mutex::new(Vec::new()));
     let events2 = events.clone();
     workload.watch(move |event| {
@@ -112,9 +108,9 @@ fn watch_erroring_workload() {
     commit_file(&upstream, "revision 1");
     let repodir = tempfile::tempdir().unwrap();
     let workdir = tempfile::tempdir().unwrap();
-    let opts = cli_options(&repodir);
     let config = config(&upstream, "/no/such/file", &[]);
-    let mut workload = GitWorkload::from_config(config, &opts);
+    let provider = DefaultUrlProvider::new(config.git.url.clone());
+    let mut workload = GitWorkload::new(config, provider, &repodir.path());
     let events = Arc::new(Mutex::new(Vec::new()));
     let events2 = events.clone();
     workload.watch(move |event| {
@@ -139,9 +135,9 @@ fn woarkload_gets_sha_env() {
     let repodir = tempfile::tempdir().unwrap();
     let next_sha = ObjectId::from_hex(next_sha.as_bytes()).unwrap();
     let workdir = tempfile::tempdir().unwrap();
-    let opts = cli_options(&repodir);
     let config = config(&upstream, "/bin/sh", &["-c", "echo $KITOPS_SHA"]);
-    let mut workload = GitWorkload::from_config(config, &opts);
+    let provider = DefaultUrlProvider::new(config.git.url.clone());
+    let mut workload = GitWorkload::new(config, provider, &repodir.path());
     let events = Arc::new(Mutex::new(Vec::new()));
     let events2 = events.clone();
     workload.watch(move |event| {

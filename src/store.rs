@@ -4,10 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{
-    errors::GitOpsError,
-    task::{scheduled::ScheduledTask, State, Workload},
-};
+use crate::{errors::GitOpsError, state::State, task::ScheduledTask, workload::Workload};
 
 pub trait Store {
     fn get(&self, id: &str) -> Option<&State>;

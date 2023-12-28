@@ -1,17 +1,8 @@
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-    thread::sleep,
-    time::Duration,
-};
+use std::{path::PathBuf, sync::Arc, thread::sleep, time::Duration};
 
-use gix::{ObjectId, Url};
+use gix::ObjectId;
 
-use crate::{
-    errors::GitOpsError,
-    git::UrlProvider,
-    task::{scheduled::ScheduledTask, Workload},
-};
+use crate::{errors::GitOpsError, task::ScheduledTask, workload::Workload};
 
 impl<W: Workload + Clone + Send + 'static> ScheduledTask<W> {
     pub fn await_finished(&self) {
@@ -23,35 +14,6 @@ impl<W: Workload + Clone + Send + 'static> ScheduledTask<W> {
     pub fn await_eligible(&self) {
         while !self.is_eligible() {
             sleep(Duration::from_millis(2));
-        }
-    }
-}
-
-pub struct TestUrl {
-    url: Url,
-    auth_url_error: Mutex<Option<GitOpsError>>,
-}
-
-impl TestUrl {
-    pub fn new(auth_url_error: Option<GitOpsError>) -> Self {
-        let url = gix::url::parse("https://example.com".into()).unwrap();
-        TestUrl {
-            url,
-            auth_url_error: Mutex::new(auth_url_error),
-        }
-    }
-}
-
-impl UrlProvider for TestUrl {
-    fn url(&self) -> &Url {
-        &self.url
-    }
-
-    fn auth_url(&self) -> Result<gix::Url, crate::errors::GitOpsError> {
-        if let Some(err) = self.auth_url_error.lock().unwrap().take() {
-            Err(err)
-        } else {
-            Ok(self.url().clone())
         }
     }
 }

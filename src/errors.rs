@@ -44,6 +44,8 @@ pub enum GitOpsError {
     NotifyError(String),
     #[error("Failed to launch action: {0}")]
     ActionError(std::io::Error),
+    #[error("Auth only on HTTPS URLs: {0}")]
+    GitHubAuthNonHttpsUrl(String),
     #[error("Missing private key file: {0}")]
     GitHubMissingPrivateKeyFile(std::io::Error),
     #[error("Malformed private RS256 key: {0}")]
