@@ -13,7 +13,9 @@ It turns out that this model can easily be applied to any configuration manageme
 The simplest way to test kitops is to run the Docker image:
 
 ```shell
-docker run bittrance/kitops --url https://github.com/bittrance/kitops --action 'echo "kitops was updated"'
+docker run --rm --name kitops bittrance/kitops \
+    --url https://github.com/bittrance/kitops \
+    --action 'echo "kitops was updated"'
 ```
 
 ## Rationale
