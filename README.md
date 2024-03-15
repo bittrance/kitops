@@ -18,6 +18,44 @@ docker run --rm --name kitops bittrance/kitops \
     --action 'echo "kitops was updated"'
 ```
 
+For a full set of commandline options, try `--help`. If you want more advanced configuration (particularly if you wan to track multiple repositories), the [example.yaml](./example.yaml) configuration file explains how.
+
+We also provide pre-built binaries for Linux, Windows and MacOS for scenarios where you want to run kitops on a virtual machine. You can download it from the [releases page](https://github.com/bittrance/kitops/releases).
+
+## How does kitops work?
+
+kitops is a statically compiled binary. It uses only pure Rust libraries and it therefore depends only on your platform's standard library (and an ssh binary where you want git+ssh support). It supports a wide variety of platforms and can be deployed in many different ways:
+
+- as a long-running process on a VM
+- as a periodic job
+- as a long-running container
+- as a CLI tool to perform a single run
+
+kitops runs each task on a schedule:
+
+![kitops workflow](images/flow.png)
+
+kitops will retry the provided actions until they all succeed, thus providing a basis for eventual consistency. Actions given to kitops need to be idempotent (that is, safe to run multiple times). When kitops successfully executes all the actions of a task, it updates its state file. The state file acts as memory between executions so if kitops is run as a periodic job, you should point `--state-file` to persistent file storage.
+
+kitops will clone repositories that are not already present in its `--repo-dir` so you can use ephemeral storage for this, but if your repositories are large, you may want to keep repositories on persistent storage too. This allows fetching only new changes, dramatically reducing network traffic.
+
+## Configuration
+
+### GitHub integration
+
+To use kitops with private repositories on GitHub, you need to create a GitHub App and install it in the private repoisitories that you want kitops to track. You pass the App's ID with `--github-app-id` and the private key using `--github-private-key-file`. The app needs to have the `repo` scope. 
+
+If you set `--github-status-context`, kitops will update the status of the commit that triggered the task. This requires the `repo:status` scope.
+
+```shell
+docker run --rm --name kitops bittrance/kitops \
+    --url https://github.com/myorg/private-repo \
+    --action ./deploy.sh \
+    --github-app-id 12345 \
+    --github-private-key-file /path/to/private-key.pem \
+    --github-status-context deploy/production
+```
+
 ## Rationale
 
 ### Why would you want to use kitops?
@@ -34,7 +72,7 @@ This model has several potential weaknesses:
 - Called APIs have to be accessible over the Internet (or require a VPN or similar)
 - It is hard to delegate responsibility for the target environment to a third party
 
-kitops enables the environment to "pull" deployments from a git repository.
+Instead, kitops enables the environment to "pull" deployments from a git repository.
 
 ![Pull-style continuous deployment](images/cd-pull-model.png)
 
@@ -42,45 +80,14 @@ This model:
 
 - is scalable - only repository rate limiting caps the number of target environments
 - adheres to the Principle of Least Privilege - the pipeline has no access to the environment and the environment only needs read access to the repository. This is particularly relevant in Azure, where granting permissions to a pipeline requires extensive AAD permissions, but creating a service principal for kitops can be delegated to developers via the `Application Developer` role.
+- separates concerns - the actions taken on the repository content can be kept separate from the repository content itself
 - is NAT-friendly - the environment only needs to be able to make outbound connections to the git server
 - allows a third party to take responsibility for the target environment
-
-### How does kitops work?
-
-kitops is a statically compiled binary. It uses only pure Rust libraries and it therefore depends only on libc (and an ssh binary where you want git+ssh support). It supports a wide variety of platforms and can be deployed in many different ways:
-
-- as a long-running process on a VM
-- as a periodic job
-- as a long-running container
-- as a CLI tool to perform a single run
-
-kitops runs each task on a schedule.
-
-<picture>
-
-Each time kitops successfully applies all the actions of a task, it updates its state file. The state file acts as memory between executions so if kitops is run as a periodic job, you should point --state-file to persistent file storage.
-
-kitops will clone repositories that are not already present in --repo-dir so you can use ephemeral storage for this, but if your repositories are large, you may want to keep repositories on persistent storage too. This allows fetching only new changes, dramatically reducing network traffic.
-
-## Example use cases
-
-### Infrastructure-as-code continuous deployment
-
-Use a serverless platform such as AWS Fargate or Azure Container Apps to run kitops as a periodic container job that applies infrastructure changes as they occur. Becuase kitops only takes a second to start and check for changes, this solution will typically cost a few dollars per month to run.
-
-This scenario still requires , manually maintained infrastructure definition for kitops itself as it does not currently have special support to update itself.
-
-### Roll your own container-based build servers
-
-One use case for Kitops is to combine it with [act](...). Kitops pullsrepo  changes and simply inokes act which will give you a local runner. Act will interact with the loval Docker daemon, much like you were using GiHub-hosted runners.
-
-This use case requires a virtual machine, because there is currently no container orchestration platform that gives access to the local Docker socket, as required by `act`.
-
-kitops cannot yet coordinate execution across multiple nodes, so you will have to balance your repositories across build servers manually.
 
 ## Alternatives
 
 - [snare](https://tratt.net/laurie/src/snare/) - tool with similar design goals, but limited to GitHub webhooks (i.e. push-based).
+- [GitHub Actions Runner](https://github.com/actions/runner) - the official runner application for GitHub Actions.
 
 ## Roadmap
 
