@@ -1,0 +1,45 @@
+# The configuration file consists of a list of tasks. Each task represents
+# a repository that kitops will monitor for changes.
+tasks:
+  - name: Example task
+    # The interval at which to check for changes in the repository.
+    interval: 1m
+    # The maximum amount of time that the task is allowed to run, 
+    # including all actions. When the timeout is reached, kitops will
+    # kill outstanding actions and mark the task as failed.
+    timeout: 60m
+    git:
+      # The URL of the Git repository to check for changes.
+      url: https://example.com/some/repository
+      # The branch to check for changes.
+      branch: main
+    # Settings specific to GitHub. This section is optional.
+    github:
+      # The App ID of the GitHub App that kitops uses to interact with 
+      # this repository. See README for more information.
+      app_id: 123456
+      # Private key file for the GitHub App that you received when you
+      # created the app.
+      private_key_file: ./private-key.pem
+      # Context used to update the commit status on GitHub. Setting this
+      # value will instruct kitops to set commit status. See
+      # https://docs.github.com/en/rest/commits/statuses for more 
+      # information.
+      status_context: example-task
+    # Actions for the task are run in sequence. kitops will abort the 
+    # task if an action fails.
+    actions:
+      - name: echo
+        # The binary to execute. Note that there is no implicit shell.
+        entrypoint: /bin/bash
+        # Arguments to pass to the binary, as a list of strings.
+        args:
+          - -c
+          - echo Hello $NAME
+        # When true, kitops will seed the child process environment 
+        # variabless with its own environment variables.
+        inherit_environment: false
+        # Environment variables to set for the child process. These will
+        # override inherited environment variables.
+        environment:
+          - NAME: World

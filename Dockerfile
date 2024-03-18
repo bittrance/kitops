@@ -1,4 +1,4 @@
-FROM rust:1.72-buster AS builder
+FROM rust:1.74-buster AS builder
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
@@ -8,6 +8,6 @@ RUN cargo install --path .
 FROM debian:buster-slim
 
 COPY --from=builder /app/target/release/kitops /usr/local/bin/kitops
-RUN apt-get update && apt-get install -y ca-certificates openssl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y tini ca-certificates openssl && rm -rf /var/lib/apt/lists/*
 
-ENTRYPOINT ["/usr/local/bin/kitops"]
+ENTRYPOINT ["tini", "/usr/local/bin/kitops", "--"]
